@@ -1,0 +1,110 @@
+/* PvP pages (rankings, IV ranker, simulator, team builder). Uses the shared design tokens only. */
+
+/* ---------- ratings ---------- */
+.rating { display: inline-flex; align-items: center; justify-content: center; min-width: 42px; padding: 1px 7px; border-radius: 6px; font-weight: 700; font-size: 0.8rem; font-variant-numeric: tabular-nums; line-height: 1.55; }
+.r-win3 { background: var(--good); color: #fff; }
+.r-win2 { background: color-mix(in srgb, var(--good) 55%, transparent); color: var(--text); }
+.r-win1 { background: var(--good-soft); color: var(--good); }
+.r-tie { background: var(--surface-3); color: var(--text-2); }
+.r-loss1 { background: var(--bad-soft); color: var(--bad); }
+.r-loss2 { background: color-mix(in srgb, var(--bad) 55%, transparent); color: var(--text); }
+.r-loss3 { background: var(--bad); color: #fff; }
+
+/* ---------- movesets ---------- */
+.moveset { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.moveset.stacked { flex-direction: column; align-items: flex-start; gap: 2px; }
+.moveset .mv { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.mv-meta { font-size: 0.72rem; color: var(--text-3); font-variant-numeric: tabular-nums; background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 5px; padding: 0 5px; line-height: 1.5; }
+
+/* ---------- rankings ---------- */
+.pvp-controls { display: grid; gap: 12px; }
+.pvp-controls .search { max-width: 320px; }
+.pvp-table td { vertical-align: middle; }
+.pvp-table tr.open td { background: var(--surface-2); }
+.pvp-table .expand-btn { background: none; border: 1px solid var(--border); border-radius: 7px; width: 28px; height: 28px; cursor: pointer; color: var(--text-2); }
+.pvp-table .expand-btn:hover { color: var(--text); border-color: var(--accent); }
+.pvp-detail td { background: var(--bg-2) !important; padding: 14px 16px !important; }
+.pvp-detail .detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.matchup-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.matchup-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 0; }
+.matchup-list a.sim-link { font-size: 0.75rem; color: var(--text-3); }
+.matchup-list a.sim-link:hover { color: var(--accent-2); }
+.score-bar { display: inline-flex; align-items: center; gap: 8px; min-width: 90px; }
+.score-bar .progress { flex: 1; min-width: 36px; }
+.type-chips .chip { padding: 2px 8px 2px 4px; }
+.type-chips .chip img { width: 15px; height: 15px; }
+.type-chips .chip.on { box-shadow: inset 0 0 0 1px var(--accent); }
+
+/* ---------- IV ranker ---------- */
+.pvp-table tr.me td { background: var(--accent-soft) !important; }
+.iv-result { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.cmp-table td, .cmp-table th { text-align: right; }
+.cmp-table td:first-child, .cmp-table th:first-child { text-align: left; }
+.family-cell { display: flex; flex-direction: column; gap: 1px; line-height: 1.3; }
+.search-out { font-family: var(--mono); font-size: 0.85rem; word-break: break-all; min-height: 70px; resize: vertical; }
+.pct-good { color: var(--good); }
+.pct-ok { color: var(--warn); }
+.pct-bad { color: var(--bad); }
+
+/* ---------- simulator ---------- */
+.sim-sides { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.side-card.side-a { border-top: 3px solid var(--accent); }
+.side-card.side-b { border-top: 3px solid var(--purple); }
+.side-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.side-dot.a { background: var(--accent); }
+.side-dot.b { background: var(--purple); }
+.stat-line { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.stat-line > div { background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 8px; padding: 4px 8px; }
+.stat-line .k { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-3); font-weight: 650; }
+.stat-line .v { font-weight: 700; font-variant-numeric: tabular-nums; }
+.hp-wrap { display: grid; gap: 4px; }
+.hpbar { height: 10px; background: var(--surface-3); border-radius: 99px; overflow: hidden; }
+.hpbar > div { height: 100%; border-radius: 99px; transition: width 0.35s ease; }
+.winner-banner { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 14px 16px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border-soft); }
+.winner-banner.win-a { background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.winner-banner.win-b { background: color-mix(in srgb, var(--purple) 12%, var(--surface-2)); border-color: color-mix(in srgb, var(--purple) 40%, transparent); }
+.winner-banner .big { font-size: 1.15rem; font-weight: 700; }
+.timeline { list-style: none; margin: 0; padding: 0; max-height: 460px; overflow-y: auto; }
+.timeline li { display: grid; grid-template-columns: 54px 14px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 4px; border-bottom: 1px solid var(--border-soft); font-size: 0.88rem; }
+.timeline li:last-child { border-bottom: 0; }
+.timeline li.fastsum { color: var(--text-2); font-size: 0.82rem; }
+.timeline li.charged { font-weight: 550; }
+.timeline .t { font-variant-numeric: tabular-nums; color: var(--text-3); font-size: 0.78rem; }
+.timeline .hp { font-variant-numeric: tabular-nums; color: var(--text-3); font-size: 0.78rem; white-space: nowrap; }
+.hp-chart { width: 100%; height: 130px; display: block; }
+.hp-chart .grid-line { stroke: var(--border-soft); stroke-width: 1; }
+.matrix { display: grid; grid-template-columns: auto repeat(3, minmax(0, 1fr)); gap: 6px; align-items: center; }
+.matrix .hdr { font-size: 0.74rem; color: var(--text-3); text-align: center; font-weight: 650; }
+.matrix button.cell { border: 1px solid transparent; border-radius: 8px; padding: 10px 4px; font-weight: 700; font-size: 1rem; cursor: pointer; font-variant-numeric: tabular-nums; }
+.matrix button.cell.cur { outline: 2px solid var(--text); outline-offset: 1px; }
+.bp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.bp-box { background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 12px; display: grid; gap: 6px; font-size: 0.9rem; }
+.bp-box h3 { font-size: 0.92rem; display: flex; align-items: center; gap: 8px; }
+.opts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; align-items: end; }
+
+/* ---------- team builder ---------- */
+.team-slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.team-slot { background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 12px; display: grid; gap: 8px; align-content: start; }
+.team-slot .slot-head { display: flex; align-items: center; gap: 8px; }
+.team-slot.empty { border-style: dashed; }
+.def-table td, .def-table th { text-align: center; }
+.def-table td:first-child, .def-table th:first-child { text-align: left; }
+.def-table tr.weak td { background: var(--bad-soft); }
+.def-table tr.strong td:last-child { color: var(--good); }
+.cov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.cov-cell { display: flex; align-items: center; justify-content: space-between; gap: 6px; background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 8px; padding: 6px 8px; }
+.cov-cell.gap { border-color: color-mix(in srgb, var(--bad) 45%, transparent); background: var(--bad-soft); }
+.cov-cell .by { font-size: 0.72rem; color: var(--text-3); }
+.grade { font-size: 2rem; font-weight: 800; line-height: 1; }
+
+@media (max-width: 1100px) {
+  .pvp-detail .detail-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 860px) {
+  .sim-sides, .bp-grid { grid-template-columns: 1fr; }
+  .team-slots { grid-template-columns: 1fr; }
+  .pvp-detail .detail-grid { grid-template-columns: 1fr; }
+  .iv-result { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .timeline li { grid-template-columns: 44px 10px minmax(0, 1fr); }
+  .timeline li .hp { grid-column: 3; }
+}

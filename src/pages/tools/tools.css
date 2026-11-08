@@ -1,0 +1,52 @@
+/* Styles shared by the Tools pages. Uses design tokens only so both themes work. */
+.tool-tiles { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+.tool-tiles .stat-tile .value { font-size: 1.2rem; }
+.tool-hero { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.tool-hero .big-cp { font-size: 2.2rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+.tool-hero .big-cp small { font-size: 0.9rem; font-weight: 650; color: var(--text-3); margin-right: 4px; }
+
+.table tr.sel td { background: var(--accent-soft) !important; }
+.table tr.muted-row td { color: var(--text-3); }
+.table td.hl { color: var(--accent-2); font-weight: 700; }
+
+.tool-note { font-size: 0.8rem; color: var(--text-3); line-height: 1.45; }
+.tool-note + .tool-note { margin-top: 4px; }
+
+.range-row { display: flex; align-items: center; gap: 10px; }
+.range-row input[type="range"] { flex: 1; }
+
+/* Evolution chain tree */
+.evo-tree { list-style: none; margin: 0; padding: 0; }
+.evo-tree ul { list-style: none; margin: 0; padding-left: 22px; border-left: 2px solid var(--border-soft); margin-left: 14px; }
+.evo-node { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; }
+.evo-node .req { display: flex; flex-wrap: wrap; gap: 4px; }
+.evo-node.current .mon-name { color: var(--accent-2); }
+.evo-arrow { color: var(--text-3); font-size: 0.85rem; }
+
+/* Search string builder */
+.search-preview {
+  font-family: var(--mono); font-size: 1rem; padding: 12px 14px; border-radius: var(--radius-sm);
+  background: var(--surface-2); border: 1px solid var(--border); word-break: break-all; min-height: 48px; width: 100%;
+  color: var(--text); resize: vertical;
+}
+.search-group { border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 8px 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.search-group.on { border-style: solid; border-color: var(--accent); background: var(--accent-soft); }
+.search-term { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 10px; border-radius: 99px; background: var(--surface-3); font-family: var(--mono); font-size: 0.85rem; }
+.search-term.not { background: var(--bad-soft); color: var(--bad); }
+.search-term button { border: 0; background: none; color: inherit; cursor: pointer; padding: 0 4px; font-size: 0.85rem; opacity: 0.75; }
+.search-term button:hover { opacity: 1; }
+.search-op { font-family: var(--mono); font-weight: 700; color: var(--text-3); }
+.chip.mono { font-family: var(--mono); }
+.preset { display: flex; flex-direction: column; gap: 6px; }
+.preset code { font-family: var(--mono); font-size: 0.82rem; word-break: break-all; background: var(--surface-3); padding: 4px 8px; border-radius: 6px; }
+
+.matrix td.num, .matrix th.num { min-width: 84px; }
+.matrix td.pick { background: var(--accent-soft); font-weight: 700; color: var(--accent-2); }
+.cell-btn { cursor: pointer; }
+
+.mega-boost { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+
+@media (max-width: 480px) {
+  .tool-hero .big-cp { font-size: 1.8rem; }
+  .tool-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "PoGo Companion",
+  "short_name": "PoGo",
+  "description": "Personal Pokémon GO companion: Pokédex, raid counters, PvP, IV calculator, live events.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ],
+  "shortcuts": [
+    { "name": "Raid counters", "url": "./#/counters" },
+    { "name": "IV calculator", "url": "./#/tools/iv" },
+    { "name": "Pokédex", "url": "./#/dex" }
+  ]
+}

@@ -1,0 +1,18 @@
+.home-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.home-hero h1 { font-size: 1.8rem; display: flex; align-items: center; gap: 10px; }
+.team-dot { width: 14px; height: 14px; border-radius: 50%; display: inline-block; }
+.team-mystic { background: #2f7ff0; } .team-valor { background: #e8433f; } .team-instinct { background: #f5c62a; }
+.home-cols { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.event-row { display: flex; align-items: center; gap: 12px; padding: 10px 18px; color: var(--text); }
+.event-row:hover { background: var(--surface-2); text-decoration: none; }
+.event-row img { width: 84px; height: 40px; object-fit: cover; border-radius: 7px; flex: none; background: var(--surface-3); }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.raid-strip { display: flex; flex-wrap: wrap; gap: 8px; }
+.raid-chip { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 92px; padding: 6px 4px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border-soft); color: var(--text); text-align: center; }
+.raid-chip:hover { border-color: var(--accent); text-decoration: none; }
+.highlight { display: block; padding: 14px 16px; color: var(--text); background-size: cover; background-position: center right; min-height: 150px; }
+.highlight:hover { text-decoration: none; border-color: var(--accent); }
+.quick { display: flex; gap: 12px; align-items: center; color: var(--text); }
+.quick-ico { font-size: 1.5rem; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 10px; background: var(--surface-3); flex: none; }
+@media (max-width: 1000px) { .home-cols { grid-template-columns: 1fr; } }
+@media (max-width: 860px) { .event-row { padding: 10px 14px; } .event-row img { width: 64px; height: 32px; } }

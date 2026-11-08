@@ -1,0 +1,80 @@
+/* Shared styles for Friendship, Medals and Items reference pages (prefix: rp-) */
+.rp-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+.rp-toolbar .input { max-width: 320px; flex: 1 1 200px; }
+.rp-note { font-size: 0.8rem; color: var(--text-3); }
+.rp-hearts { color: #e5484d; letter-spacing: 1px; white-space: nowrap; }
+.rp-hearts .off { color: var(--surface-3); }
+.rp-tr-current td { background: var(--accent-soft) !important; }
+.rp-perks { display: flex; flex-wrap: wrap; gap: 4px; }
+.rp-sources { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.rp-source { display: flex; gap: 10px; align-items: flex-start; }
+.rp-source .ico { font-size: 1.3rem; line-height: 1.2; width: 26px; text-align: center; flex: none; }
+.rp-source .t { font-weight: 600; }
+.rp-source .d { font-size: 0.8rem; color: var(--text-3); }
+
+/* buddy distance grid */
+.rp-buddy-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.rp-buddy { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border-soft); color: var(--text); min-width: 0; }
+.rp-buddy:hover { border-color: var(--border); background: var(--surface-3); text-decoration: none; }
+.rp-buddy .n { font-weight: 600; font-size: 0.86rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-buddy .s { font-size: 0.74rem; color: var(--text-3); }
+.rp-km { display: inline-flex; align-items: center; justify-content: center; min-width: 38px; padding: 1px 7px; border-radius: 99px; font-size: 0.74rem; font-weight: 700; font-variant-numeric: tabular-nums; color: #fff; }
+.rp-km.k1 { background: #3b9f6b; }
+.rp-km.k3 { background: #4f8ef7; }
+.rp-km.k5 { background: #a77bf3; }
+.rp-km.k20 { background: #e5484d; }
+
+/* medals */
+.rp-medal-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.rp-medal { background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--shadow); }
+.rp-medal-head { display: flex; align-items: center; gap: 10px; }
+.rp-medal-head .name { font-weight: 650; flex: 1; min-width: 0; }
+.rp-medal-icon { width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex: none; font-size: 1rem; border: 2px solid var(--border); background: var(--surface-2); }
+.rp-medal-icon.t1 { border-color: #b9773f; background: rgba(185, 119, 63, 0.18); }
+.rp-medal-icon.t2 { border-color: #a7b1c2; background: rgba(167, 177, 194, 0.2); }
+.rp-medal-icon.t3 { border-color: #d4a72c; background: rgba(212, 167, 44, 0.2); }
+.rp-medal-icon.t4 { border-color: #7fd0e6; background: rgba(127, 208, 230, 0.2); }
+.rp-medal-icon img { width: 22px; height: 22px; }
+.rp-tiers { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.rp-tier { text-align: center; border-radius: 7px; padding: 3px 2px; background: var(--surface-2); border: 1px solid var(--border-soft); font-size: 0.76rem; line-height: 1.3; }
+.rp-tier .tn { display: block; font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-3); font-weight: 650; }
+.rp-tier .tv { font-weight: 700; font-variant-numeric: tabular-nums; }
+.rp-tier.done.t1 { border-color: #b9773f; }
+.rp-tier.done.t2 { border-color: #a7b1c2; }
+.rp-tier.done.t3 { border-color: #d4a72c; }
+.rp-tier.done.t4 { border-color: #7fd0e6; }
+.rp-tier.done { background: var(--surface-3); }
+.rp-tier.done .tn { color: var(--text-2); }
+.rp-medal-progress { display: flex; align-items: center; gap: 10px; }
+.rp-medal-progress .input { width: 120px; flex: none; }
+.rp-medal-progress .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.rp-tierpill { font-size: 0.72rem; font-weight: 700; padding: 1px 8px; border-radius: 99px; white-space: nowrap; }
+.rp-tierpill.t0 { background: var(--surface-3); color: var(--text-3); }
+.rp-tierpill.t1 { background: #b9773f; color: #1a0e00; }
+.rp-tierpill.t2 { background: #a7b1c2; color: #10141c; }
+.rp-tierpill.t3 { background: #d4a72c; color: #1a1300; }
+.rp-tierpill.t4 { background: #7fd0e6; color: #062530; }
+.progress.rp-p1 > div { background: #b9773f; }
+.progress.rp-p2 > div { background: #a7b1c2; }
+.progress.rp-p3 > div { background: #d4a72c; }
+.progress.rp-p4 > div { background: #7fd0e6; }
+
+/* items */
+.rp-item-list { list-style: none; margin: 0; padding: 0; }
+.rp-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; padding: 10px 18px; border-top: 1px solid var(--border-soft); }
+.rp-item:first-child { border-top: 0; }
+.rp-item .nm { font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rp-item .ds { grid-column: 1 / -1; font-size: 0.86rem; color: var(--text-2); }
+.rp-item .lv { text-align: right; font-size: 0.8rem; color: var(--text-3); white-space: nowrap; }
+.rp-item .lv b { color: var(--text); font-variant-numeric: tabular-nums; }
+.rp-item details { grid-column: 1 / -1; font-size: 0.8rem; color: var(--text-3); }
+.rp-item details ul { margin: 6px 0 0; padding-left: 18px; }
+.rp-item details li { margin-bottom: 3px; }
+.rp-groups { columns: 2 420px; column-gap: 16px; }
+.rp-groups > .card { break-inside: avoid; margin-bottom: 16px; display: inline-block; width: 100%; }
+
+@media (max-width: 860px) {
+  .rp-medal-grid { grid-template-columns: 1fr; }
+  .rp-item { padding: 10px 14px; }
+  .rp-buddy-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+}

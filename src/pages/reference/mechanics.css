@@ -1,0 +1,48 @@
+/* Game Mechanics guide (src/pages/reference/Mechanics.tsx) */
+.mech-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; align-items: start; }
+.mech-toc { position: sticky; top: calc(var(--header-h) + 16px); }
+.mech-toc ol { list-style: none; margin: 0; padding: 6px; counter-reset: toc; }
+.mech-toc li { counter-increment: toc; }
+.mech-toc button {
+  width: 100%; text-align: left; background: none; border: 0; cursor: pointer; color: var(--text-2);
+  padding: 6px 10px; border-radius: 7px; font-size: 0.88rem; display: flex; gap: 8px;
+}
+.mech-toc button::before { content: counter(toc); color: var(--text-3); font-variant-numeric: tabular-nums; min-width: 16px; }
+.mech-toc button:hover { background: var(--surface-2); color: var(--text); }
+.mech-toc button.on { background: var(--accent-soft); color: var(--accent-2); }
+.mech-sections > .card { scroll-margin-top: calc(var(--header-h) + 14px); }
+.mech-sections > * + * { margin-top: 16px; }
+.mech-sections h3 { margin: 16px 0 8px; font-size: 0.98rem; }
+.mech-sections h3:first-child { margin-top: 0; }
+.mech-sections p { color: var(--text-2); }
+.mech-sections p strong, .mech-sections li strong { color: var(--text); }
+.mech-sections ul.mech-list { margin: 0 0 0.6em; padding-left: 20px; color: var(--text-2); }
+.mech-sections ul.mech-list li + li { margin-top: 3px; }
+
+.formula {
+  font-family: var(--mono); font-size: 0.86rem; background: var(--surface-2); border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm); padding: 10px 12px; overflow-x: auto; white-space: pre; line-height: 1.65; margin: 0 0 10px;
+  color: var(--text);
+}
+.formula .hl { color: var(--accent-2); font-weight: 650; }
+.formula .cm { color: var(--text-3); }
+.mech-example { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.mech-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.mech-note { font-size: 0.8rem; color: var(--text-3); margin-top: 6px; }
+.approx { display: inline-block; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 0 6px; border-radius: 99px; background: var(--warn-soft); color: var(--warn); vertical-align: middle; line-height: 1.7; white-space: nowrap; }
+.data-src { display: inline-block; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 0 6px; border-radius: 99px; background: var(--good-soft); color: var(--good); vertical-align: middle; line-height: 1.7; white-space: nowrap; }
+.mech-result { font-size: 1.9rem; font-weight: 750; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.cpm-scroll { max-height: 460px; overflow: auto; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); }
+.cpm-scroll tr.dim td { color: var(--text-3); }
+.cpm-scroll tr.mark td { background: var(--accent-soft); }
+.mech-calc { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-bottom: 12px; }
+
+@media (max-width: 1000px) {
+  .mech-layout { grid-template-columns: minmax(0, 1fr); }
+  .mech-toc { position: static; }
+  .mech-toc ol { display: flex; flex-wrap: wrap; gap: 4px; }
+  .mech-toc li { flex: none; }
+  .mech-toc button { width: auto; background: var(--surface-2); border: 1px solid var(--border-soft); padding: 4px 10px; font-size: 0.82rem; }
+  .mech-example { grid-template-columns: minmax(0, 1fr); }
+}
+.mech-sections, .mech-sections > * { min-width: 0; }

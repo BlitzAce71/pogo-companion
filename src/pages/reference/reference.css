@@ -1,0 +1,69 @@
+/* ============================================================
+   Reference pages: Weather Boosts, Trainer Levels
+   ============================================================ */
+
+/* ---------- weather ---------- */
+.ref-weather-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.ref-weather {
+  display: flex; flex-direction: column; gap: 10px; text-align: left; cursor: pointer; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow);
+  transition: border-color 0.12s, background 0.12s;
+}
+.ref-weather:hover { border-color: var(--border); }
+.ref-weather.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+.ref-weather .head { display: flex; align-items: center; gap: 12px; }
+.ref-weather .ico { font-size: 2rem; line-height: 1; width: 40px; text-align: center; }
+.ref-weather .nm { font-weight: 650; font-size: 1.02rem; }
+.ref-weather .meta { font-size: 0.8rem; color: var(--text-3); }
+.ref-effects { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.ref-effect { display: flex; gap: 12px; align-items: flex-start; }
+.ref-effect .big { font-size: 1.25rem; font-weight: 750; font-variant-numeric: tabular-nums; color: var(--accent-2); min-width: 64px; }
+.ref-effect .t { font-weight: 600; }
+.ref-effect .d { font-size: 0.84rem; color: var(--text-2); }
+.ref-table tr.hl td { background: var(--accent-soft); }
+.ref-wx { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ref-wx .i { font-size: 1.1rem; }
+.ref-moves { display: flex; flex-direction: column; gap: 6px; }
+.ref-moves .mv { display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--border-soft); }
+.ref-moves .mv:last-child { border-bottom: 0; }
+
+/* ---------- trainer levels ---------- */
+.ref-chart { width: 100%; height: auto; display: block; }
+.ref-chart .grid-line { stroke: var(--border-soft); stroke-width: 1; }
+.ref-chart .axis-label { fill: var(--text-3); font-size: 11px; font-family: var(--font); }
+.ref-chart .bar { fill: var(--accent); opacity: 0.75; cursor: pointer; }
+.ref-chart .bar:hover { opacity: 1; }
+.ref-chart .bar.ms { fill: var(--warn); opacity: 0.9; }
+.ref-chart .bar.mine { fill: var(--good); opacity: 1; }
+.ref-chart .bar.cap { opacity: 0.3; }
+.ref-chart .area { fill: var(--accent-soft); }
+.ref-chart .line { fill: none; stroke: var(--accent); stroke-width: 2; }
+.ref-chart .marker { stroke: var(--good); stroke-width: 2; stroke-dasharray: 4 3; }
+.ref-chart .marker-label { fill: var(--good); font-size: 11px; font-weight: 700; font-family: var(--font); }
+.ref-chart .cap-line { stroke: var(--bad); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.ref-chart .cap-label { fill: var(--bad); font-size: 11px; font-weight: 650; font-family: var(--font); }
+.ref-levels td { vertical-align: top; }
+.ref-levels tr.ms td { background: color-mix(in srgb, var(--warn) 7%, transparent); }
+.ref-levels tr.mine td { background: var(--good-soft); }
+.ref-levels tr.sel td { outline: none; box-shadow: inset 0 0 0 9999px var(--accent-soft); }
+.ref-levels tr.cap td { opacity: 0.6; }
+.ref-lvl { display: inline-flex; align-items: center; justify-content: center; min-width: 34px; height: 26px; border-radius: 7px; font-weight: 750; background: var(--surface-3); font-variant-numeric: tabular-nums; }
+.ref-levels tr.ms .ref-lvl { background: var(--warn); color: #1a1300; }
+.ref-levels tr.mine .ref-lvl { background: var(--good); color: #04140c; }
+.ref-rewards { display: flex; flex-wrap: wrap; gap: 4px; }
+.ref-reward { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--border-soft); font-size: 0.78rem; white-space: nowrap; }
+.ref-reward b { font-variant-numeric: tabular-nums; }
+.ref-reward.storage { border-style: dashed; color: var(--text-2); }
+.ref-reward.special { border-color: color-mix(in srgb, var(--warn) 50%, transparent); background: var(--warn-soft); }
+.ref-unlock { display: inline-flex; padding: 1px 8px; border-radius: 99px; background: var(--good-soft); color: var(--good); font-size: 0.76rem; font-weight: 650; white-space: nowrap; }
+.ref-xp-card .big { font-size: 2.2rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 860px) {
+  .ref-weather-grid { grid-template-columns: 1fr 1fr; }
+  .ref-weather { padding: 12px; }
+  .ref-weather .ico { font-size: 1.6rem; width: 30px; }
+  .ref-levels .rew-col { min-width: 220px; }
+}
+@media (max-width: 480px) {
+  .ref-weather-grid { grid-template-columns: 1fr; }
+}
