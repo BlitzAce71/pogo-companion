@@ -38,6 +38,7 @@ export interface Pokemon {
   evolutions?: Evolution[];
   megas?: string[];      // mega/primal ids for this base form
   megaOf?: string;       // set on mega/primal entries → base id
+  costumeOf?: string;    // set on costume checklist entries (built in the app) → base id
   megaEnergy?: { first: number; after: number } | null;
   buddyKm: number;
   buddySize: string | null;
@@ -125,6 +126,18 @@ export interface RankingRow {
   sp?: number;           // stat product
 }
 
+/** A costume / event variant. Same stats and moves as its base entry. */
+export interface Costume {
+  id: string;            // e.g. "PIKACHU__HOLIDAY_2016" (also the My Dex collection key)
+  dex: number;
+  base: string;          // Pokemon id it belongs to
+  code: string;          // game code, e.g. "HOLIDAY_2016", "POP_STAR"
+  name: string;          // readable name derived from the code, e.g. "Holiday 2016"
+  img: string;           // sprite basename, e.g. "pm25.cHOLIDAY_2016"
+  shinyImg: boolean;     // a shiny sprite exists
+  noEvolve?: boolean;    // event costume that can't evolve
+}
+
 export interface Medal { id: string; name: string; desc: string; targets: number[]; type: PokeType | null }
 export interface Item { id: string; name: string; desc: string; category: string; level: number | null }
 export interface Reference { medals: Medal[]; items: Item[] }
@@ -136,6 +149,10 @@ export interface GameData {
   types: TypeChart;
   settings: Settings;
   reference: Reference;
+  costumes: Costume[];
+  costumeById: Record<string, Costume>;
+  /** Costumes whose base entry is this Pokémon id */
+  costumesFor: (pokemonId: string) => Costume[];
   /** All non-mega entries for a family, in evolution order */
   family: (familyId: string) => Pokemon[];
   /** Resolve a PvPoke species id (may end in _shadow) */

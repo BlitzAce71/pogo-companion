@@ -18,6 +18,7 @@ const FLAG = Object.fromEntries(DEX_FLAGS.map((f) => [f.key, f])) as Record<DexF
 /** Whether a flag can apply to a Pokémon (based on game data), with a reason when it can't. */
 function flagEligibility(p: Pokemon, flag: DexFlag): string | null {
   if (p.megaOf) return flag === 'caught' || flag === 'shiny' ? null : 'Not applicable to Mega/Primal forms';
+  if (p.costumeOf) return flag === 'caught' || flag === 'shiny' || flag === 'lucky' || flag === 'hundo' ? null : 'Not tracked for costumes';
   switch (flag) {
     case 'shadow': case 'purified': return p.shadowReleased ? null : 'Shadow form not released';
     case 'lucky': return p.tradable ? null : 'Not tradable';
@@ -33,12 +34,13 @@ interface DexView {
   type: string;                      // '' = all
   show: 'all' | 'missing' | 'have';
   megas: boolean;
+  costumes: boolean;
   unreleased: boolean | null;        // null = follow preferences
   forms: 'species' | 'all';
   hideInel: boolean;
   groupGen: boolean;
 }
-const DEFAULT_VIEW: DexView = { mode: 'caught', gen: 0, type: '', show: 'all', megas: false, unreleased: null, forms: 'species', hideInel: true, groupGen: true };
+const DEFAULT_VIEW: DexView = { mode: 'caught', gen: 0, type: '', show: 'all', megas: false, costumes: false, unreleased: null, forms: 'species', hideInel: true, groupGen: true };
 
 function onImgError(e: SyntheticEvent<HTMLImageElement>) {
   const img = e.currentTarget;
@@ -90,7 +92,7 @@ function DexDrawer({ p, entry, onToggle, onClear, onClose }: { p: Pokemon; entry
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, [onClose]);
-  const base = p.megaOf ? byId[p.megaOf] : null;
+  const base = p.megaOf ? byId[p.megaOf] : p.costumeOf ? byId[p.costumeOf] : null;
   return (
     <div className="overlay cx-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal cx-modal" role="dialog" aria-modal="true" aria-label={displayName(p)}>
@@ -126,9 +128,9 @@ function DexDrawer({ p, entry, onToggle, onClear, onClose }: { p: Pokemon; entry
           </div>
           <div className="row" style={{ gap: 8 }}>
             <Link className="btn sm" to={`/dex/${base ? base.id : p.id}`}>📖 Pokédex entry</Link>
-            {!p.megaOf && <Link className="btn sm" to={`/tools/iv?id=${p.id}`}>🧮 IV Calculator</Link>}
-            {!p.megaOf && <Link className="btn sm" to={`/pvp/ivs?id=${p.id}&league=great`}>📊 PvP IVs</Link>}
-            <Link className="btn sm" to={`/counters?boss=${p.id}`}>🛡️ Counters</Link>
+            {!p.megaOf && <Link className="btn sm" to={`/tools/iv?id=${p.costumeOf || p.id}`}>🧮 IV Calculator</Link>}
+            {!p.megaOf && <Link className="btn sm" to={`/pvp/ivs?id=${p.costumeOf || p.id}&league=great`}>📊 PvP IVs</Link>}
+            <Link className="btn sm" to={`/counters?boss=${p.costumeOf || p.id}`}>🛡️ Counters</Link>
           </div>
         </div>
         <div className="cx-modal-foot">
@@ -171,8 +173,17 @@ export default function MyDex() {
       if (p.formName && REGIONAL.test(p.formName)) return true;
       return chosen.get(p.speciesId) === p;
     });
-    return out.sort((a, b) => a.dex - b.dex || (a.megaOf ? 1 : 0) - (b.megaOf ? 1 : 0));
-  }, [data.pokemon, showUnreleased, view.megas, view.forms]);
+    if (view.costumes) {
+      const inPool = new Set(pool.map((p) => p.id));
+      for (const c of data.costumes) {
+        const b = data.byId[c.base];
+        if (!b || !inPool.has(b.id)) continue;
+        out.push({ ...b, id: c.id, img: c.img, shinyImg: c.shinyImg, form: 'COSTUME', formName: c.name, costumeOf: b.id, megas: undefined });
+      }
+    }
+    const rank = (p: Pokemon) => (p.megaOf ? 1 : 0) + (p.costumeOf ? 2 : 0);
+    return out.sort((a, b) => a.dex - b.dex || rank(a) - rank(b));
+  }, [data.pokemon, data.costumes, data.byId, showUnreleased, view.megas, view.costumes, view.forms]);
 
   // Progress per flag (overall) and per generation (active flag)
   const progress = useMemo(() => {
@@ -292,7 +303,7 @@ export default function MyDex() {
     toast.show(`${on ? 'Marked' : 'Cleared'} ${fmt(targets.length)} Pokémon`);
   };
 
-  const detailP = detail ? data.byId[detail] : null;
+  const detailP = detail ? data.byId[detail] || base.find((p) => p.id === detail) || null : null;
   const caughtStat = progress.overall.find((o) => o.flag.key === 'caught')!;
   const modeStat = progress.overall.find((o) => o.flag.key === mode)!;
   const filtered = !!(q || view.gen || view.type || view.show !== 'all');
@@ -310,7 +321,7 @@ export default function MyDex() {
       <div className="grid grid-4">
         <div className="stat-tile"><div className="label">Caught</div><div className="value">{fmt(caughtStat.have)} <span className="faint small">/ {fmt(caughtStat.total)}</span></div><div className="sub">{pct(caughtStat.total ? (caughtStat.have / caughtStat.total) * 100 : 0)} complete</div></div>
         <div className="stat-tile"><div className="label">{modeFlag.label}</div><div className="value">{fmt(modeStat.have)} <span className="faint small">/ {fmt(modeStat.total)}</span></div><div className="sub">{pct(modeStat.total ? (modeStat.have / modeStat.total) * 100 : 0)} of eligible</div></div>
-        <div className="stat-tile"><div className="label">Entries tracked</div><div className="value">{fmt(base.length)}</div><div className="sub">{view.forms === 'all' ? 'All forms' : 'Species + regional forms'}{view.megas ? ' + Megas' : ''}</div></div>
+        <div className="stat-tile"><div className="label">Entries tracked</div><div className="value">{fmt(base.length)}</div><div className="sub">{view.forms === 'all' ? 'All forms' : 'Species + regional forms'}{view.megas ? ' + Megas' : ''}{view.costumes ? ' + costumes' : ''}</div></div>
         <div className="stat-tile"><div className="label">Missing ({modeFlag.label})</div><div className="value">{fmt(modeStat.total - modeStat.have)}</div><div className="sub">across {progress.gens.length} generations</div></div>
       </div>
 
@@ -334,6 +345,7 @@ export default function MyDex() {
           <div className="row" style={{ gap: 16 }}>
             <Switch checked={view.forms === 'all'} onChange={(v) => patch({ forms: v ? 'all' : 'species' })} label="All forms" title="Include every form (Rotom, Deoxys, Arceus …), not just species + regional variants" />
             <Switch checked={view.megas} onChange={(v) => patch({ megas: v })} label="Mega / Primal" />
+            <Switch checked={view.costumes} onChange={(v) => patch({ costumes: v })} label="Costumes" title="Add costume / event Pokémon as separate checklist entries" />
             <Switch checked={showUnreleased} onChange={(v) => patch({ unreleased: v })} label="Unreleased" />
             <Switch checked={view.hideInel} onChange={(v) => patch({ hideInel: v })} label="Hide ineligible" title="Hide Pokémon that can't have the active flag (e.g. no Shadow form)" />
             <Switch checked={view.groupGen} onChange={(v) => patch({ groupGen: v })} label="Group by generation" />

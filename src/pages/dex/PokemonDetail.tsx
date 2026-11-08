@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import { Card, Empty, IvBars, MoveTag, MultChip, PokeImg, Rank, Segmented, StatBar, StatTile, Types, useSort } from '../../components/ui';
 import { displayName, isElite, movePool, useData, useRankings } from '../../lib/data';
 import { fmt } from '../../lib/format';
@@ -101,6 +101,7 @@ function Detail({ p }: { p: Pokemon }) {
       </div>
 
       <Evolutions p={p} />
+      <Costumes p={p} />
       <PveMovesets p={p} />
       <PvpSection p={p} />
       <MoveLists p={p} />
@@ -262,6 +263,42 @@ function Evolutions({ p }: { p: Pokemon }) {
           ))}
         </div>
       )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------- costumes
+function Costumes({ p }: { p: Pokemon }) {
+  const data = useData();
+  const { collection, toggle } = useCollection();
+  const { hash } = useLocation();
+  const [shiny, setShiny] = useState(false);
+  const list = data.costumesFor(p.id);
+  useEffect(() => {
+    if (hash === '#costumes') setTimeout(() => document.getElementById('costumes')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+  }, [hash]);
+  if (!list.length) return null;
+  const have = list.filter((c) => collection[c.id]?.caught).length;
+  return (
+    <Card id="costumes" title={<>Costumes &amp; event forms <span className="badge" style={{ marginLeft: 6 }}>{have} / {list.length} caught</span></>}
+      actions={<button className={`btn sm ${shiny ? 'primary' : ''}`} onClick={() => setShiny((s) => !s)}>✦ Shiny</button>}
+      footer="Costume Pokémon have the same stats and moves as the regular form. Names come from the game's internal codes. “Can’t evolve” costumes were event-only catches that stay in their form.">
+      <div className="costume-grid">
+        {list.map((c) => {
+          const e = collection[c.id] || {};
+          return (
+            <div key={c.id} className={`costume-tile ${e.caught ? 'owned' : ''}`}>
+              <PokeImg p={c} size={64} shiny={shiny} />
+              <span className="small bold center" style={{ lineHeight: 1.2 }}>{c.name}</span>
+              {c.noEvolve && <span className="tiny faint">can’t evolve</span>}
+              <div className="row" style={{ gap: 4, justifyContent: 'center', marginTop: 4 }}>
+                <button className={`flag-btn ${e.caught ? 'on' : ''}`} style={e.caught ? { background: DEX_FLAGS[0].color } : undefined} onClick={() => toggle(c.id, 'caught')} title="Caught">{e.caught ? '✓' : '+'} Caught</button>
+                <button className={`flag-btn ${e.shiny ? 'on' : ''}`} style={e.shiny ? { background: DEX_FLAGS[1].color } : undefined} onClick={() => toggle(c.id, 'shiny')} title="Shiny">✦</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </Card>
   );
 }

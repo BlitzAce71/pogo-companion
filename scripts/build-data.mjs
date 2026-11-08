@@ -183,10 +183,11 @@ async function main() {
 
   // ------------------------------------------------------------ forms/costumes
   const costumeForms = new Set();
+  const costumeSpecies = {};
   const formAssets = {};
   for (const d of byKey.formSettings || []) {
     for (const f of d.formSettings.forms || []) {
-      if (f.isCostume) costumeForms.add(f.form);
+      if (f.isCostume) { costumeForms.add(f.form); costumeSpecies[f.form] = d.formSettings.pokemon; }
       if (f.assetBundleSuffix) formAssets[f.form] = f.assetBundleSuffix;
     }
   }
@@ -450,6 +451,52 @@ async function main() {
   // Sort by dex then base form first
   out.sort((a, b) => a.dex - b.dex || (a.megaOf ? 1 : 0) - (b.megaOf ? 1 : 0) || (a.form ? 1 : 0) - (b.form ? 1 : 0) || a.id.localeCompare(b.id));
 
+  // ------------------------------------------------------------ costumes
+  // Costume Pokémon share stats/moves with their regular form, so they're kept as a
+  // separate list linked to the base entry. Two sources: costume forms in the game
+  // master (e.g. PIKACHU_POP_STAR) and costume sprite codes (pm25.cHOLIDAY_2016).
+  const COSTUME_WORDS = {
+    GOFEST: 'GO Fest', GOTOUR: 'GO Tour', WCS: 'Worlds', VS: 'VS', TSHIRT: 'T-Shirt', TCG: 'TCG', PI: 'Pi', M: 'M',
+    JAN: 'January', FEB: 'February', APRIL: 'April', MAY: 'May', NOVEMBER: 'November', COPY: 'Clone',
+    ANNIV: 'Anniversary', '5TH': '5th', STIARA: 'Tiara (S)', MTIARA: 'Tiara (M)', DIWALI: 'Diwali',
+  };
+  const costumeName = (code) => code.replace(/_NOEVOLVE$/, '').split('_').map((w) => COSTUME_WORDS[w] || (/^\d+$/.test(w) ? (w.length === 2 && !/^20/.test(w) ? `#${Number(w)}` : w) : w[0] + w.slice(1).toLowerCase())).join(' ');
+  const baseByDex = {};
+  for (const p of out) if (!p.megaOf && (!baseByDex[p.dex] || (!p.form && baseByDex[p.dex].form))) baseByDex[p.dex] = p;
+  const costumes = new Map();
+  const addCostume = (dex, code, kind, speciesId) => {
+    const base = (speciesId && out.find((p) => p.speciesId === speciesId && !p.megaOf && !p.form)) || baseByDex[dex];
+    if (!base) return;
+    const key = `${base.speciesId}__${code}`;
+    if (costumes.has(key)) return;
+    const img = `pm${dex}.${kind}${code}`;
+    costumes.set(key, {
+      id: key, dex, base: base.id, code, name: costumeName(code), img,
+      shinyImg: assetFiles.size ? assetFiles.has(`${img}.s.icon.png`) : true,
+      noEvolve: /NOEVOLVE/.test(code) || undefined,
+    });
+  };
+  for (const f of assetFiles) {
+    const m = f.match(/^pm(\d+)\.c([A-Z0-9_]+)\.icon\.png$/);
+    if (m) addCostume(Number(m[1]), m[2], 'c');
+  }
+  for (const form of costumeForms) {
+    const sp = costumeSpecies[form];
+    const base = out.find((p) => p.speciesId === sp && !p.megaOf);
+    if (!base) continue;
+    addCostume(base.dex, form.slice(sp.length + 1), 'f', sp);
+  }
+  // The same costume can appear as both a form and a sprite code — merge by Pokémon + name
+  const byName = new Map();
+  for (const c of costumes.values()) {
+    const k = `${c.base}|${c.name}`;
+    const prev = byName.get(k);
+    if (!prev) { byName.set(k, c); continue; }
+    if (!prev.shinyImg && c.shinyImg) byName.set(k, { ...c, noEvolve: prev.noEvolve && c.noEvolve });
+    else prev.noEvolve = prev.noEvolve && c.noEvolve ? true : undefined;
+  }
+  const costumeList = [...byName.values()].sort((a, b) => a.dex - b.dex || a.name.localeCompare(b.name));
+
   // Strip moves that don't exist; collect learners
   for (const p of out) for (const k of ['fast', 'charged', 'eliteFast', 'eliteCharged']) p[k] = p[k].filter((m) => moves[m]);
 
@@ -636,13 +683,14 @@ async function main() {
   // ------------------------------------------------------------ write
   console.log('Writing output…');
   write('pokemon.json', out);
+  write('costumes.json', costumeList);
   write('moves.json', moves);
   write('types.json', typeChart);
   write('settings.json', settings);
   write('reference.json', { medals, items });
 
   const rel = out.filter((p) => p.released);
-  console.log(`Done: ${out.length} Pokémon entries (${rel.length} released), ${Object.keys(moves).length} moves, ${medals.length} medals, ${items.length} items, ${rankIndex.length} ranking sets.`);
+  console.log(`Done: ${out.length} Pokémon entries (${rel.length} released), ${costumeList.length} costumes, ${Object.keys(moves).length} moves, ${medals.length} medals, ${items.length} items, ${rankIndex.length} ranking sets.`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import type { GameData, Move, Pokemon, RankingRow, Reference, Settings, TypeChart } from './types';
+import type { Costume, GameData, Move, Pokemon, RankingRow, Reference, Settings, TypeChart } from './types';
 
 const BASE = import.meta.env.BASE_URL + 'data/';
 
@@ -9,7 +9,7 @@ async function getJson<T>(file: string): Promise<T> {
   return res.json();
 }
 
-function build(pokemon: Pokemon[], moves: Record<string, Move>, types: TypeChart, settings: Settings, reference: Reference): GameData {
+function build(pokemon: Pokemon[], moves: Record<string, Move>, types: TypeChart, settings: Settings, reference: Reference, costumes: Costume[]): GameData {
   const byId: Record<string, Pokemon> = {};
   for (const p of pokemon) byId[p.id] = p;
   const families: Record<string, Pokemon[]> = {};
@@ -21,8 +21,12 @@ function build(pokemon: Pokemon[], moves: Record<string, Move>, types: TypeChart
   }
   const pv: Record<string, Pokemon> = {};
   for (const p of pokemon) if (p.pvpoke && !pv[p.pvpoke]) pv[p.pvpoke] = p;
+  const costumeById: Record<string, Costume> = {};
+  const costumesByBase: Record<string, Costume[]> = {};
+  for (const c of costumes) { costumeById[c.id] = c; (costumesByBase[c.base] ||= []).push(c); }
   return {
     pokemon, byId, moves, types, settings, reference,
+    costumes, costumeById, costumesFor: (id) => costumesByBase[id] || [],
     family: (f) => families[f] || [],
     fromPvpoke: (id) => {
       if (pv[id]) return { pokemon: pv[id], shadow: false };
@@ -44,8 +48,9 @@ export function DataProvider({ children, fallback }: { children: ReactNode; fall
       getJson<TypeChart>('types.json'),
       getJson<Settings>('settings.json'),
       getJson<Reference>('reference.json'),
+      getJson<Costume[]>('costumes.json').catch(() => [] as Costume[]),
     ])
-      .then(([p, m, t, s, r]) => setData(build(p, m, t, s, r)))
+      .then(([p, m, t, s, r, c]) => setData(build(p, m, t, s, r, c)))
       .catch((e) => setError(String(e)));
   }, []);
   if (error) return <div className="boot-error"><h2>Couldn’t load game data</h2><p>{error}</p><button className="btn" onClick={() => location.reload()}>Retry</button></div>;

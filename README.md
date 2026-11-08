@@ -26,6 +26,7 @@ A personal Pokémon GO companion web app. It covers live game info, a full Poké
   - neutral raid DPS/TDO for every moveset
   - PvP ranks and rank-1 IVs for each league
   - full PvE/PvP move tables
+- Costume and event Pokémon: about 290 costumes from the game files, shown in a Pokédex "Costumes" filter and a gallery on each Pokémon's page, and trackable in My Dex. Names are derived from the game's internal codes.
 - Moves database: raid and Trainer Battle stats, buff effects, and who learns each move (regular and Elite TM)
 - Type chart with defensive and offensive calculators
 

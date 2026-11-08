@@ -5,11 +5,11 @@ import { displayName, useData } from '../../lib/data';
 import { fmt } from '../../lib/format';
 import { cp, TYPES } from '../../lib/pogo';
 import { useCollection, useStored } from '../../lib/storage';
-import type { PokeType, Pokemon } from '../../lib/types';
+import type { Costume, PokeType, Pokemon } from '../../lib/types';
 import './dex.css';
 
 const GEN_NAMES = ['', 'Kanto', 'Johto', 'Hoenn', 'Sinnoh', 'Unova', 'Kalos', 'Alola', 'Galar', 'Paldea'];
-type Cat = 'all' | 'legendary' | 'mythical' | 'ultra_beast' | 'mega' | 'regional' | 'shadow' | 'dmax' | 'gmax' | 'starter';
+type Cat = 'all' | 'legendary' | 'mythical' | 'ultra_beast' | 'mega' | 'regional' | 'shadow' | 'dmax' | 'gmax' | 'starter' | 'costume';
 
 interface Filters { q: string; types: PokeType[]; gen: number; cat: Cat; view: 'grid' | 'table'; unreleased: boolean; megas: boolean; owned: 'any' | 'have' | 'missing' }
 const DEFAULT: Filters = { q: '', types: [], gen: 0, cat: 'all', view: 'grid', unreleased: false, megas: true, owned: 'any' };
@@ -41,6 +41,7 @@ export default function Pokedex() {
         case 'dmax': if (!p.dmax) return false; break;
         case 'gmax': if (!p.gmax) return false; break;
         case 'starter': if (!p.tags.includes('starter')) return false; break;
+        case 'costume': if (!data.costumesFor(p.id).length) return false; break;
       }
       if (filters.owned !== 'any') {
         const has = !!collection[p.id]?.caught;
@@ -54,6 +55,20 @@ export default function Pokedex() {
       return true;
     });
   }, [data, filters.q, filters.types, filters.gen, filters.cat, filters.unreleased, filters.megas, filters.owned, collection]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const isCostumes = filters.cat === 'costume';
+  const costumeRows = useMemo(() => {
+    if (!isCostumes) return [] as Costume[];
+    const q = filters.q.trim().toLowerCase();
+    const bases = new Set(data.pokemon.filter((p) => !filters.gen || p.gen === filters.gen).filter((p) => !filters.types.length || filters.types.every((t) => p.types.includes(t))).map((p) => p.id));
+    return data.costumes.filter((c) => {
+      if (!bases.has(c.base)) return false;
+      if (filters.owned !== 'any') { const has = !!collection[c.id]?.caught; if (filters.owned === 'have' ? !has : has) return false; }
+      if (q) { const b = data.byId[c.base]; if (!`${b.name} ${c.name}`.toLowerCase().includes(q) && String(c.dex) !== q.replace('#', '')) return false; }
+      return true;
+    });
+  }, [isCostumes, data, filters.q, filters.gen, filters.types, filters.owned, collection]); // eslint-disable-line react-hooks/exhaustive-deps
+  const costumeView = useShowMore(costumeRows, 120);
 
   const maxCp = useMemo(() => {
     const m = new Map<string, number>();
@@ -75,7 +90,7 @@ export default function Pokedex() {
 
   return (
     <div>
-      <PageHeader title="Pokédex" subtitle={`${fmt(rows.length)} Pokémon · stats, moves, evolutions, costs and battle ratings for every species and form.`}
+      <PageHeader title="Pokédex" subtitle={isCostumes ? `${fmt(costumeRows.length)} costume & event Pokémon from the game files. Costumes share stats and moves with the regular form.` : `${fmt(rows.length)} Pokémon · stats, moves, evolutions, costs and battle ratings for every species and form.`}
         actions={<Segmented value={filters.view} onChange={(v) => set({ view: v })} options={[{ id: 'grid', label: '▦ Grid' }, { id: 'table', label: '☰ Table' }]} />} />
 
       <Card className="dex-filters">
@@ -85,7 +100,7 @@ export default function Pokedex() {
           <Select value={filters.cat} onChange={(v) => set({ cat: v })} style={{ width: 170 }} options={[
             { id: 'all', label: 'All categories' }, { id: 'legendary', label: 'Legendary' }, { id: 'mythical', label: 'Mythical' }, { id: 'ultra_beast', label: 'Ultra Beasts' },
             { id: 'mega', label: 'Mega & Primal' }, { id: 'regional', label: 'Regional forms' }, { id: 'shadow', label: 'Shadow available' },
-            { id: 'dmax', label: 'Dynamax (game files)' }, { id: 'gmax', label: 'Gigantamax (game files)' }, { id: 'starter', label: 'Starters' },
+            { id: 'dmax', label: 'Dynamax (game files)' }, { id: 'gmax', label: 'Gigantamax (game files)' }, { id: 'starter', label: 'Starters' }, { id: 'costume', label: 'Costumes / event' },
           ] as { id: Cat; label: string }[]} />
           <button className={`btn ${showFilters || filters.types.length ? 'primary' : ''}`} onClick={() => setShowFilters((x) => !x)}>Types{filters.types.length ? ` (${filters.types.length})` : ''}</button>
           {activeCount > 0 && <button className="btn ghost" onClick={() => set({ types: [], gen: 0, cat: 'all', owned: 'any', q: '' })}>Clear</button>}
@@ -111,6 +126,15 @@ export default function Pokedex() {
       </Card>
 
       <div style={{ height: 16 }} />
+      {isCostumes ? (
+        <>
+          {costumeRows.length === 0 && <Empty>No costume Pokémon match these filters.</Empty>}
+          <div className="dex-grid">
+            {costumeView.visible.map((c) => <CostumeTile key={c.id} c={c} base={data.byId[c.base]} caught={!!collection[c.id]?.caught} shiny={!!collection[c.id]?.shiny} />)}
+          </div>
+          {costumeView.more}
+        </>
+      ) : <>
       {rows.length === 0 && <Empty>No Pokémon match these filters.</Empty>}
 
       {filters.view === 'grid' ? (
@@ -142,7 +166,20 @@ export default function Pokedex() {
         </Card>
       )}
       {more}
+      </>}
     </div>
+  );
+}
+
+function CostumeTile({ c, base, caught, shiny }: { c: Costume; base: Pokemon; caught: boolean; shiny: boolean }) {
+  return (
+    <Link to={`/dex/${base.id}#costumes`} className="dex-tile" style={{ ['--tc' as string]: `var(--t-${base.types[0]})` }} title={`${base.name} — ${c.name}`}>
+      <span className="dex-num">#{String(c.dex).padStart(4, '0')}</span>
+      {caught && <span className="dex-own" title={shiny ? 'Caught (shiny)' : 'Caught'}>{shiny ? '✦' : '●'}</span>}
+      <PokeImg p={c} size={72} shiny={shiny} />
+      <span className="dex-name">{base.name}</span>
+      <span className="dex-form">{c.name}{c.noEvolve ? ' · can’t evolve' : ''}</span>
+    </Link>
   );
 }
 

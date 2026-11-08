@@ -2,7 +2,7 @@
 // from Leek Duck via the ScrapedDuck project. Falls back to the snapshot bundled at build time.
 import { useEffect, useState } from 'react';
 import { displayName } from './data';
-import type { GameData, Pokemon } from './types';
+import type { Costume, GameData, Pokemon } from './types';
 
 export interface LiveMon { name: string; image: string; canBeShiny?: boolean; combatPower?: { min: number; max: number } | { normal: { min: number; max: number }; boosted: { min: number; max: number } } }
 export interface LiveEvent {
@@ -106,7 +106,7 @@ function index(data: GameData) {
   return map;
 }
 
-export interface Resolved { pokemon: Pokemon; shadow: boolean; dynamax: boolean; gigantamax: boolean }
+export interface Resolved { pokemon: Pokemon; shadow: boolean; dynamax: boolean; gigantamax: boolean; costume?: Costume }
 
 /** Map a Leek Duck Pokémon name (e.g. "Shadow Alolan Raichu", "Mega Charizard Y", "Gigantamax Snorlax") to our data. */
 export function resolveLiveName(data: GameData, rawName: string, image?: string): Resolved | null {
@@ -118,6 +118,10 @@ export function resolveLiveName(data: GameData, rawName: string, image?: string)
   strip(/\bgigantamax\b/, 'gigantamax');
   strip(/\bdynamax\b/, 'dynamax');
   strip(/\b(forme?|style|mode|cloak|plumage|size)\b/);
+  // Costume / event sprite (pm25.cHOLIDAY_2016.icon.png, pm25.fPOP_STAR.icon.png)
+  const cm = image?.match(/\/(pm\d+\.[cf][A-Z0-9_]+)(?:\.s)?\.icon\.png/);
+  const costume = cm ? data.costumes?.find((c) => c.img === cm[1]) : undefined;
+  if (costume && data.byId[costume.base]) return { pokemon: data.byId[costume.base], ...flags, costume };
   if (map.has(n)) return { pokemon: map.get(n)!, ...flags };
   // Image-based (pmNNN.fFORM.icon.png or pokemon_icon_NNN_FF.png)
   if (image) {

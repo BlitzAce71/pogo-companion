@@ -91,7 +91,7 @@ export default function Home() {
                         const to = res ? `/counters?boss=${res.pokemon.id}${res.shadow ? '&tier=shadow' + (tier.match(/\d/)?.[0] || '5') : ''}` : '/raids';
                         return (
                           <Link key={r.name} to={to} className="raid-chip" title={`Counters for ${r.name}`}>
-                            {res ? <PokeImg p={res.pokemon} size={44} /> : <img src={r.image} width={44} height={44} alt="" />}
+                            {res ? <PokeImg p={res.costume ?? res.pokemon} size={44} /> : <img src={r.image} width={44} height={44} alt="" />}
                             <span className="small bold" style={{ lineHeight: 1.15 }}>{r.name}</span>
                             {r.canBeShiny && <span className="tiny warn">✦ shiny</span>}
                           </Link>
@@ -163,7 +163,7 @@ function Highlight({ e, now }: { e: LiveEvent; now: number }) {
       <div className="small muted">{dateRange(start, end)}</div>
       {e.extraData?.spotlight?.bonus && <div className="small" style={{ marginTop: 4 }}>Bonus: <b>{e.extraData.spotlight.bonus}</b></div>}
       <div className="row" style={{ marginTop: 8, gap: 4 }}>
-        {mons.slice(0, 6).map((m) => { const r = resolveLiveName(data, m.name, m.image); return r ? <PokeImg key={m.name} p={r.pokemon} size={40} /> : <img key={m.name} src={m.image} width={40} height={40} alt={m.name} />; })}
+        {mons.slice(0, 6).map((m) => { const r = resolveLiveName(data, m.name, m.image); return r ? <PokeImg key={m.name} p={r.costume ?? r.pokemon} size={40} /> : <img key={m.name} src={m.image} width={40} height={40} alt={m.name} />; })}
         <span className="spacer" />
         <b className="small">{st === 'live' ? <>ends in <Countdown to={end!} /></> : start ? <>in <Countdown to={start} /></> : null}</b>
       </div>

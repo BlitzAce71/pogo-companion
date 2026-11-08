@@ -55,7 +55,7 @@ export function LiveSprite({ image, p, size = 48, shiny, shadow }: { image?: str
 /** Name of a live Pokémon, linked to the Pokédex when resolved */
 export function LiveName({ name, r }: { name: string; r: Resolved | null }) {
   if (!r) return <span className="bold">{name}</span>;
-  return <Link to={`/dex/${r.pokemon.id}`} className="bold live-name">{r.shadow ? `Shadow ${displayName(r.pokemon)}` : name.replace(/^Shadow /, 'Shadow ')}</Link>;
+  return <Link to={`/dex/${r.pokemon.id}${r.costume ? '#costumes' : ''}`} className="bold live-name" title={r.costume ? `Costume: ${r.costume.name}` : undefined}>{r.shadow ? `Shadow ${displayName(r.pokemon)}` : name.replace(/^Shadow /, 'Shadow ')}</Link>;
 }
 
 // ---------------------------------------------------------------- badges
