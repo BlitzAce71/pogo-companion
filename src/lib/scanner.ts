@@ -83,6 +83,96 @@ export function borderColor(p: Pixels, r: Rect): [number, number, number] {
 // Threshold tuned on real recordings: 13 keeps pale Pokémon (Seel, Goldeen, Galarian Corsola) from
 // fading into the near-white storage background without picking up compression noise.
 const GLOW_STEP = 5;
+
+/** Pale gold of the lucky sparkles (semi-transparent gold discs over the tile) */
+const isLuckyGold = (r: number, g: number, b: number) => r >= 215 && g >= 175 && g <= r + 6 && b >= 90 && b <= g - 14 && r - b >= 25;
+/** Pink-magenta of the Dynamax / Gigantamax "X" */
+const isDmaxPink = (r: number, g: number, b: number) => r >= 150 && b >= 120 && r - g >= 35 && b - g >= 18 && b <= r + 25;
+
+/**
+ * Pixels of a box that belong to a background decoration rather than the Pokémon: the gold sparkles
+ * of a lucky Pokémon (recognised by round gold discs on the background) and the pink Dynamax "X"
+ * (pink nearly all in the upper right, where the X sits, reaching the top edge). Normal tiles return null, so yellow or pink
+ * Pokémon are never touched.
+ */
+export function backgroundOverlays(p: Pixels, r: Rect, bg: [number, number, number]): Uint8Array | null {
+  const { w, h } = r;
+  const gold = new Uint8Array(w * h), pink = new Uint8Array(w * h);
+  let pinkTR = 0, pinkAll = 0, pinkTop = 0, pinkMid = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = px(p, r.x + x, r.y + y), R = p.data[i], G = p.data[i + 1], B = p.data[i + 2];
+    if (isLuckyGold(R, G, B)) gold[y * w + x] = 1;
+    if (isDmaxPink(R, G, B)) {
+      pink[y * w + x] = 1; pinkAll++;
+      if (x > w * 0.45 && y < h * 0.55) pinkTR++;
+      if (y < h * 0.12) pinkTop++;
+      if (x > w * 0.3 && x < w * 0.7 && y > h * 0.4) pinkMid++;
+    }
+  }
+  // Gold pieces: 4-connected components of a colour class, with how much of their outline is background
+  const nearBg = (k: number) => { const i = px(p, r.x + (k % w), r.y + ((k / w) | 0)); return cdist(p.data[i], p.data[i + 1], p.data[i + 2], bg[0], bg[1], bg[2]) < 20; };
+  const pieces = (cls: Uint8Array, visit: (pix: number[], n: number, fill: number, round: boolean, onBg: number) => void) => {
+    const seen = new Uint8Array(w * h), stack: number[] = [];
+    for (let s = 0; s < w * h; s++) {
+      if (!cls[s] || seen[s]) continue;
+      const pix: number[] = [];
+      let edgeBg = 0, edgeAll = 0, x0 = w, x1 = 0, y0 = h, y1 = 0;
+      seen[s] = 1; stack.push(s);
+      while (stack.length) {
+        const k = stack.pop()!; pix.push(k);
+        const x = k % w, y = (k / w) | 0;
+        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+        for (const q of [x > 0 ? k - 1 : -1, x < w - 1 ? k + 1 : -1, y > 0 ? k - w : -1, y < h - 1 ? k + w : -1]) {
+          if (q < 0) continue;
+          if (cls[q]) { if (!seen[q]) { seen[q] = 1; stack.push(q); } } else { edgeAll++; if (nearBg(q)) edgeBg++; }
+        }
+      }
+      const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+      visit(pix, pix.length, pix.length / (bw * bh), bw <= bh * 2 && bh <= bw * 2, edgeAll ? edgeBg / edgeAll : 0);
+    }
+  };
+  // Lucky: at least two round gold discs sitting on the background. (Cream or tan patches of a
+  // Pokémon — Lillipup, Raichu — are gold-ish too, but they border the Pokémon's other colours.)
+  let discs = 0;
+  pieces(gold, (_, n, fill, round, onBg) => { if (n >= 8 && fill >= 0.5 && round && onBg >= 0.75) discs++; });
+  const lucky = discs >= 2;
+  // the X: plenty of pink, nearly all of it in the upper right, reaching the top edge, little in the middle
+  const dmax = pinkTR >= w * h * 0.025 && pinkTR >= pinkAll * 0.9 && pinkTop >= w * h * 0.0025 && pinkMid <= pinkAll * 0.15;
+  if (!lucky && !dmax) return null;
+  const out = new Uint8Array(w * h);
+  if (lucky) {
+    // Remove the sparkles piece by piece: small gold pieces mostly surrounded by background (a disc,
+    // or the visible part of one tucked behind the Pokémon) — not a cream belly inside an orange body.
+    // Sparkles range from pale to saturated yellow, so use a wider colour range here.
+    const warm = new Uint8Array(w * h);
+    for (let k = 0; k < w * h; k++) {
+      const i = px(p, r.x + (k % w), r.y + ((k / w) | 0)), R = p.data[i], G = p.data[i + 1], B = p.data[i + 2];
+      warm[k] = R >= 200 && G >= 150 && G <= R + 6 && B <= G - 14 && R - B >= 30 ? 1 : 0;
+    }
+    pieces(warm, (pix, n, _f, _r, onBg) => { if (n <= w * h * 0.15 && onBg >= 0.5) for (const k of pix) out[k] = 1; });
+  }
+  if (dmax) {
+    // the X's pale outline and shading are pinkish too
+    for (let k = 0; k < w * h; k++) {
+      const i = px(p, r.x + (k % w), r.y + ((k / w) | 0)), R = p.data[i], G = p.data[i + 1], B = p.data[i + 2];
+      if (R >= 150 && R - G >= 12 && B - G >= -4 && B <= R + 25) out[k] = 1;
+    }
+  }
+  // and the soft fringe around what was removed
+  for (let pass = 0; pass < 2; pass++) {
+    const add: number[] = [];
+    for (let k = 0; k < w * h; k++) {
+      if (out[k]) continue;
+      const x = k % w, y = (k / w) | 0;
+      if (!((x > 0 && out[k - 1]) || (x < w - 1 && out[k + 1]) || (y > 0 && out[k - w]) || (y < h - 1 && out[k + w]))) continue;
+      const i = px(p, r.x + x, r.y + y);
+      if (cdist(p.data[i], p.data[i + 1], p.data[i + 2], bg[0], bg[1], bg[2]) < 40) add.push(k);
+    }
+    for (const k of add) out[k] = 1;
+  }
+  return out;
+}
+
 export function spriteMask(p: Pixels, r: Rect, bg: [number, number, number], threshold = 13): Float32Array {
   const { w, h } = r;
   const m = new Float32Array(w * h);
@@ -91,6 +181,10 @@ export function spriteMask(p: Pixels, r: Rect, bg: [number, number, number], thr
     const d = cdist(p.data[i], p.data[i + 1], p.data[i + 2], bg[0], bg[1], bg[2]);
     m[y * w + x] = Math.max(0, Math.min(1, (d - threshold * 0.6) / threshold));
   }
+  // Lucky sparkles and the Dynamax "X" are drawn behind the Pokémon: on tiles that have them, their
+  // colour counts as background.
+  const over = backgroundOverlays(p, r, bg);
+  if (over) for (let k = 0; k < w * h; k++) if (over[k]) m[k] = 0;
   // Recently caught Pokémon sit on a soft blue-green glow. It fades smoothly out of the background, so
   // the background fill may also spread through glow-coloured pixels — but only in small steps, which
   // stops it at the Pokémon's (sharp) edge.
@@ -174,9 +268,12 @@ function dropSmallParts(m: Float32Array, w: number, h: number) {
     return bh <= h * 0.3 && bw >= bh * 1.3;
   });
   const others = sizes.reduce((s, n, id) => (isText[id] ? s : s + n), 0);
-  // The favourite star sits beside the CP number, so it pokes into the box's top-right corner. A
-  // separate piece entirely in that corner is the star (or what's left of it), not the Pokémon.
-  const isStar = sizes.map((n, id) => { const [x0, , , y1] = boxes[id]; return n !== largest && x0 >= w * 0.68 && y1 <= h * 0.32; });
+  // The favourite star sits beside the CP number, poking into the box's top-right corner, and the shiny
+  // ✦ icon sits in the top-left corner. A separate piece entirely in either corner is one of those.
+  const isStar = sizes.map((n, id) => {
+    const [x0, , x1, y1] = boxes[id];
+    return n !== largest && y1 <= h * 0.32 && (x0 >= w * 0.68 || x1 <= w * 0.36);
+  });
   for (let k = 0; k < w * h; k++) {
     const id = label[k];
     if (id < 0) continue;
@@ -193,7 +290,8 @@ function dropSmallParts(m: Float32Array, w: number, h: number) {
 export function eraseScrollHandle(p: Pixels): boolean {
   const W = p.width, s = W / 540;
   const xa = Math.round(W * 0.915), xb = Math.round(W * 0.975);
-  const isArrow = (i: number) => { const r = p.data[i], g = p.data[i + 1], b = p.data[i + 2]; return r < 140 && g - r > 35 && b - r > 35 && g < 215; };
+  // teal arrows; the handle fades in and out, so allow arrows part-blended into the white handle
+  const isArrow = (i: number) => { const r = p.data[i], g = p.data[i + 1], b = p.data[i + 2]; return r < 185 && g - r > 24 && b - r > 20 && g < 228; };
   // rows with arrow-coloured pixels inside the strip → runs
   const runs: [number, number][] = [];
   let start = -1, gap = 0;

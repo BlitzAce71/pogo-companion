@@ -249,7 +249,14 @@ async function main() {
       `${base}.fNORMAL`, // some species only ship a NORMAL-form icon (e.g. Kyurem, Genesect)
     ].filter(Boolean);
     if (!assetFiles.size) return cands[0];
-    return cands.find((c) => assetFiles.has(`${c}.icon.png`)) || base;
+    const hit = cands.find((c) => assetFiles.has(`${c}.icon.png`));
+    if (hit) return hit;
+    // Species that only ship per-form icons (Vivillon patterns, Maushold families, Minior cores…):
+    // use a form icon, preferring a NORMAL one and avoiding alternate states like Mimikyu's BUSTED
+    const forms = [...assetFiles].filter((f) => new RegExp(`^${base}\\.f[A-Z0-9_]+\\.icon\\.png$`).test(f)).map((f) => f.replace('.icon.png', '')).sort();
+    // A few aren't in the PokeMiners listing at all; LeekDuck has them under these form names
+    const known = { 778: 'fDISGUISED', 931: 'fGREEN' }[dex];
+    return forms.find((f) => f.endsWith('.fNORMAL')) || forms.find((f) => !/BUSTED|COSTUME|_[0-9]{4}/.test(f)) || forms[0] || (known ? `${base}.${known}` : base);
   };
 
   const sig = (s) => JSON.stringify([s.type, s.type2, s.stats, [...(s.quickMoves || [])].sort(), [...(s.cinematicMoves || [])].sort(), s.eliteQuickMove, s.eliteCinematicMove]);
