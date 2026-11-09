@@ -262,11 +262,15 @@ function Calibrate({ page, cal, setCal, pages, onScan }: { page: Page; cal: Grid
     const [a, d] = next;
     const pitchX = Math.abs(d.x - a.x), pitchY = Math.abs(d.y - a.y);
     if (pitchX < 20 || pitchY < 20) { setClicks([]); return; }
+    // Defaults measured from a real storage screen: big Pokémon (e.g. Charizard) fill the space from just
+    // under the CP number to just above the name, so the box spans that: centre ~0.33 rows below the CP
+    // number, ~0.5 rows tall, ~80% of the column width. Stars/letters poking in at the edges are ignored.
     const base: GridCalibration = {
-      x0: Math.min(a.x, d.x), pitchX, pitchY, y0: Math.min(a.y, d.y), boxW: 0.62, boxH: 0.5, columns: 3, width: p.width,
-      // The first clicked Pokémon is in the first fully visible row, so anything above its picture is
-      // header / search bar. Rows that scroll partly under it are skipped (they reappear on the next page).
-      top: Math.max(0, Math.round(Math.min(a.y, d.y) - pitchY * 0.27)), bottom: Math.round(p.height * 0.88),
+      // the CP number sits a little right of the tile centre (the small "CP" label is on its left)
+      version: 2, x0: Math.min(a.x, d.x) - pitchX * 0.04, pitchX, pitchY, y0: Math.min(a.y, d.y), boxW: 0.8, boxH: 0.5, offsetY: 0.33, columns: 3, width: p.width,
+      // The first clicked CP number is in the first fully visible row, so anything above it is header /
+      // search bar. Rows that scroll partly under it are skipped (they reappear on the next page).
+      top: Math.max(0, Math.round(Math.min(a.y, d.y) - pitchY * 0.08)), bottom: Math.round(p.height * 0.88),
     };
     setCal({ ...base, rowTemplate: learnRowTemplate(p, base) });
     setClicks([]);
@@ -280,15 +284,16 @@ function Calibrate({ page, cal, setCal, pages, onScan }: { page: Page; cal: Grid
       <Card title="3. Line up the grid" className="sticky-side">
         {redo ? (
           <div className="col" style={{ gap: 10 }}>
-            <p className="small">Click the <b>centre of the first Pokémon</b> (top-left), then the <b>centre of the Pokémon one row down and one column right</b>. This tells the scanner your screen’s grid spacing. It’s remembered for next time.</p>
-            <div className="badge accent">{clicks.length === 0 ? 'Click the first Pokémon' : 'Now click the one diagonally below-right'}</div>
+            <p className="small">Click the <b>CP number of the first Pokémon</b> (top-left), then the <b>CP number of the Pokémon one row down and one column right</b>. This tells the scanner your screen’s grid spacing. It’s remembered for next time.</p>
+            <div className="badge accent">{clicks.length === 0 ? 'Click the first CP number' : 'Now click the CP number diagonally below-right'}</div>
             {usable && <button className="btn sm" onClick={() => { setRedo(false); setClicks([]); }}>Keep previous calibration</button>}
           </div>
         ) : usable && (
           <div className="col" style={{ gap: 12 }}>
-            <p className="small muted">Green boxes should sit around each Pokémon’s picture (not the CP or name). Blue lines mark the scrolling area — move them to exclude the search bar and bottom buttons.</p>
+            <p className="small muted">Each green box should cover the space between the CP number and the name — big Pokémon should fit inside, and the box shouldn’t touch the name. Blue lines mark the scrolling area — move them to exclude the search bar and bottom buttons. Name letters and favourite stars that poke into a box are ignored.</p>
             <Field label={`Top of scroll area · ${Math.round(usable.top)}px`}><input type="range" min={0} max={p.height / 2} value={usable.top} onChange={(e) => patch({ top: Number(e.target.value) })} /></Field>
             <Field label={`Bottom of scroll area · ${Math.round(usable.bottom)}px`}><input type="range" min={p.height / 2} max={p.height} value={usable.bottom} onChange={(e) => patch({ bottom: Number(e.target.value) })} /></Field>
+            <Field label="Move boxes up / down"><input type="range" min={0.1} max={0.65} step={0.005} value={usable.offsetY} onChange={(e) => patch({ offsetY: Number(e.target.value) })} /></Field>
             <Field label="Picture box width"><input type="range" min={0.3} max={0.95} step={0.01} value={usable.boxW} onChange={(e) => patch({ boxW: Number(e.target.value) })} /></Field>
             <Field label="Picture box height"><input type="range" min={0.25} max={0.9} step={0.01} value={usable.boxH} onChange={(e) => patch({ boxH: Number(e.target.value) })} /></Field>
             <Field label="Columns"><Segmented size="sm" value={usable.columns} onChange={(v) => patch({ columns: v })} options={[{ id: 3, label: '3' }, { id: 4, label: '4' }]} /></Field>

@@ -94,7 +94,46 @@ export function spriteMask(p: Pixels, r: Rect, bg: [number, number, number], thr
     if (y > 0) stack.push(k - w); if (y < h - 1) stack.push(k + w);
   }
   for (let k = 0; k < w * h; k++) if (!seen[k] && m[k] < 0.5) m[k] = 1;
+  dropSmallParts(m, w, h);
   return m;
+}
+
+/**
+ * Remove small separate blobs that poke in from the edge of the box (letters of the name, the
+ * favourite star, tag icons) so only the Pokémon's picture is fingerprinted. Small pieces fully
+ * inside the box are kept — they're usually part of the sprite (e.g. Magnemite's magnets).
+ */
+function dropSmallParts(m: Float32Array, w: number, h: number) {
+  const label = new Int32Array(w * h).fill(-1);
+  const sizes: number[] = [];
+  const edge: boolean[] = [];
+  const stack: number[] = [];
+  for (let start = 0; start < w * h; start++) {
+    if (m[start] < 0.5 || label[start] >= 0) continue;
+    const id = sizes.length;
+    let size = 0, touches = false;
+    stack.push(start);
+    label[start] = id;
+    while (stack.length) {
+      const k = stack.pop()!;
+      size++;
+      const x = k % w, y = (k / w) | 0;
+      if (x === 0 || y === 0 || x === w - 1 || y === h - 1) touches = true;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const xx = x + dx, yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+        const n = yy * w + xx;
+        if (m[n] >= 0.5 && label[n] < 0) { label[n] = id; stack.push(n); }
+      }
+    }
+    sizes.push(size);
+    edge.push(touches);
+  }
+  if (sizes.length < 2) return;
+  // Edge-touching blobs other than the main one are intruders unless they're big (the favourite star
+  // can be ~20% the size of a small Pokémon like Caterpie, so the bar is half the main blob).
+  const largest = Math.max(...sizes), keepEdge = largest * 0.5;
+  for (let k = 0; k < w * h; k++) { const id = label[k]; if (id >= 0 && edge[id] && sizes[id] < keepEdge && sizes[id] !== largest) m[k] = 0; }
 }
 
 /** Fingerprint a sprite inside rect r of an image (same algorithm as build-sprites.mjs). */
@@ -208,25 +247,30 @@ export const answerKey = (r: SpriteRef) => `${r.id}|${r.costume || ''}|${r.shiny
 
 // ---------------------------------------------------------------- grid geometry
 export interface GridCalibration {
-  /** Sprite-centre of the first tile (column 0) and horizontal/vertical pitch, in frame pixels at the analysis width */
+  /** Calibration format. 2 = anchored on the CP number of each tile. */
+  version: number;
+  /** Anchor (CP number centre) of the first tile (column 0) and horizontal/vertical pitch, in frame pixels at the analysis width */
   x0: number; pitchX: number; pitchY: number;
-  /** Sprite box size relative to pitch (0–1) */
+  /** Picture box size relative to pitch (0–1) */
   boxW: number; boxH: number;
-  /** Vertical offset of the sprite centre inside a tile row, used only for the initial frame */
+  /** Picture box centre below the anchor, as a fraction of the row pitch */
+  offsetY: number;
+  /** Anchor y of the first row on the calibration frame */
   y0: number;
   /** Scrollable grid area (rows outside are ignored) */
   top: number; bottom: number;
   columns: number;
   /** Analysis width the calibration was made at */
   width: number;
-  /** Foreground pattern of one row period (index 0 = sprite centre), learned from the calibration frame */
+  /** Foreground pattern of one row period (index 0 = anchor), learned from the calibration frame */
   rowTemplate?: number[];
 }
 
 /** A calibration is only usable if every measurement is a sensible number (guards against corrupt saved data). */
 export function validCalibration(c: GridCalibration | null | undefined, width?: number): c is GridCalibration {
   if (!c) return false;
-  const nums = [c.x0, c.pitchX, c.pitchY, c.boxW, c.boxH, c.top, c.bottom, c.width, c.columns];
+  if (c.version !== 2) return false; // older calibrations used a different anchor — redo the clicks
+  const nums = [c.x0, c.pitchX, c.pitchY, c.boxW, c.boxH, c.offsetY, c.top, c.bottom, c.width, c.columns];
   if (!nums.every((n) => typeof n === 'number' && Number.isFinite(n))) return false;
   if (c.pitchX < 20 || c.pitchY < 20 || c.boxW <= 0 || c.boxH <= 0 || c.bottom <= c.top || c.columns < 1) return false;
   return width === undefined || c.width === width;
@@ -305,8 +349,8 @@ export function tileRects(p: Pixels, cal: GridCalibration, phase: number): Rect[
   if (!validCalibration(cal) || !Number.isFinite(phase)) return [];
   const w = Math.round(cal.boxW * cal.pitchX), h = Math.round(cal.boxH * cal.pitchY);
   const rects: Rect[] = [];
-  // first row centre at or after the top edge with its whole box visible
-  let cy = phase;
+  // first row whose whole picture box is visible (box centre = anchor + offset)
+  let cy = phase + cal.offsetY * cal.pitchY;
   while (cy - h / 2 < cal.top) cy += cal.pitchY;
   while (cy - cal.pitchY - h / 2 >= cal.top) cy -= cal.pitchY;
   for (; cy + h / 2 <= cal.bottom; cy += cal.pitchY) {
