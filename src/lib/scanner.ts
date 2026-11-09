@@ -861,7 +861,7 @@ export function trackSteps(profiles: Float32Array[], cal: GridCalibration): numb
 }
 
 // ---------------------------------------------------------------- search-string attributes
-export interface ScanAttributes { lucky?: boolean; shadow?: boolean; purified?: boolean; shiny?: boolean; dynamax?: boolean; gigantamax?: boolean; costume?: boolean; female?: boolean; male?: boolean; stars?: 0 | 1 | 2 | 3 | 4; favorite?: boolean; legendary?: boolean }
+export interface ScanAttributes { lucky?: boolean; shadow?: boolean; purified?: boolean; shiny?: boolean; dynamax?: boolean; gigantamax?: boolean; costume?: boolean; female?: boolean; male?: boolean; stars?: 0 | 1 | 2 | 3 | 4; favorite?: boolean; legendary?: boolean; /** 0/0/0 IVs (searched as 0attack&0defense&0hp) */ nundo?: boolean }
 
 /**
  * Attributes every Pokémon in a scan must have, read from the in-game search string used.
@@ -869,9 +869,11 @@ export interface ScanAttributes { lucky?: boolean; shadow?: boolean; purified?: 
  */
 export function attributesFromSearch(search: string): ScanAttributes {
   const out: ScanAttributes = {};
+  const zero = new Set<string>();
   for (const raw of search.toLowerCase().split('&')) {
     const t = raw.trim();
     if (!t || t.startsWith('!') || /[,;:]/.test(t)) continue;
+    if (t === '0attack' || t === '0defense' || t === '0hp') zero.add(t);
     switch (t) {
       case 'lucky': out.lucky = true; break;
       case 'shadow': out.shadow = true; break;
@@ -888,6 +890,7 @@ export function attributesFromSearch(search: string): ScanAttributes {
       case '3*': out.stars = 3; break; case '4*': out.stars = 4; break;
     }
   }
+  if (zero.size === 3) out.nundo = true;
   return out;
 }
 

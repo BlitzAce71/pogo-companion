@@ -427,7 +427,9 @@ function ImportCard({ data, items, attrs, search }: { data: GameData; items: Sca
         if (attrs.dynamax) flags.push('dynamax');
         if (attrs.gigantamax) flags.push('gigantamax');
         if (attrs.stars === 4) flags.push(a.shiny ? 'shundo' : 'hundo');
-        mark(a.costume || a.id, flags.filter((f) => !a.costume || f === 'shiny' || f === 'lucky' || f === 'hundo'));
+        if (attrs.stars === 3) flags.push('threestar');
+        if (attrs.nundo) flags.push('nundo');
+        mark(a.costume || a.id, flags.filter((f) => !a.costume || ['shiny', 'lucky', 'hundo', 'threestar', 'nundo'].includes(f)));
         if (a.costume) mark(a.id, []); // a costume also registers the species
       }
       setAll(next);
@@ -439,7 +441,7 @@ function ImportCard({ data, items, attrs, search }: { data: GameData; items: Sca
       const makeNew = (a: Answer): SavedMon => ({
         uid: Math.random().toString(36).slice(2, 10), id: a.id, shiny: a.shiny || undefined,
         lucky: attrs.lucky || undefined, shadow: attrs.shadow || undefined, purified: attrs.purified || undefined,
-        ivs: attrs.stars === 4 ? [15, 15, 15] : undefined,
+        ivs: attrs.stars === 4 ? [15, 15, 15] : attrs.nundo ? [0, 0, 0] : undefined,
         nickname: a.costume ? data.costumeById[a.costume]?.name : undefined,
         tags: [...tags, ...(a.female ? ['female'] : []), ...(a.costume ? ['costume'] : [])], notes: search ? `Scanned with search: ${search}` : undefined, added: now,
       });
@@ -455,7 +457,7 @@ function ImportCard({ data, items, attrs, search }: { data: GameData; items: Sca
           used.add(target.uid);
           Object.assign(target, {
             lucky: target.lucky || attrs.lucky || undefined, shadow: target.shadow || attrs.shadow || undefined, purified: target.purified || attrs.purified || undefined,
-            ivs: attrs.stars === 4 ? [15, 15, 15] : target.ivs, tags: [...new Set([...(target.tags || []), ...tags])],
+            ivs: attrs.stars === 4 ? [15, 15, 15] : attrs.nundo ? [0, 0, 0] : target.ivs, tags: [...new Set([...(target.tags || []), ...tags])],
           });
           merged++;
         }

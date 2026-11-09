@@ -60,6 +60,8 @@ export const DEX_FLAGS = [
   { key: 'shiny', label: 'Shiny', short: '✦', color: '#f2b631' },
   { key: 'lucky', label: 'Lucky', short: 'L', color: '#e8c547' },
   { key: 'hundo', label: '100% IV', short: '💯', color: '#e5484d' },
+  { key: 'threestar', label: '3★', short: '3★', color: '#f76b15' }, // appraisal 37–44 total IVs (82–98%)
+  { key: 'nundo', label: 'Nundo', short: '0', color: '#7c8594' }, // 0/0/0 IVs
   { key: 'shadow', label: 'Shadow', short: 'S', color: '#8e4ec6' },
   { key: 'purified', label: 'Purified', short: 'P', color: '#a3c4f3' },
   { key: 'xxl', label: 'XXL', short: 'XXL', color: '#30a46c' },

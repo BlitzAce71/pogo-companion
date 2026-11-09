@@ -18,7 +18,7 @@ const FLAG = Object.fromEntries(DEX_FLAGS.map((f) => [f.key, f])) as Record<DexF
 /** Whether a flag can apply to a Pokémon (based on game data), with a reason when it can't. */
 function flagEligibility(p: Pokemon, flag: DexFlag): string | null {
   if (p.megaOf) return flag === 'caught' || flag === 'shiny' ? null : 'Not applicable to Mega/Primal forms';
-  if (p.costumeOf) return flag === 'caught' || flag === 'shiny' || flag === 'lucky' || flag === 'hundo' ? null : 'Not tracked for costumes';
+  if (p.costumeOf) return flag === 'caught' || flag === 'shiny' || flag === 'lucky' || flag === 'hundo' || flag === 'threestar' || flag === 'nundo' ? null : 'Not tracked for costumes';
   switch (flag) {
     case 'shadow': case 'purified': return p.shadowReleased ? null : 'Shadow form not released';
     case 'lucky': return p.tradable ? null : 'Not tradable';
