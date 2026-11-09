@@ -75,7 +75,9 @@ Live data (events, raids, research, eggs, Rocket) is fetched in the browser at r
 
 ### Using it on your phone
 
-The app is a static site with relative paths. To install it as an app:
+**GitHub Pages (set up):** `.github/workflows/deploy.yml` builds and publishes the site on every push, every Monday (with freshly downloaded game data), and on demand from the repository's **Actions** tab (**Build and deploy → Run workflow**). In the repository settings, set **Pages → Source** to **GitHub Actions**.
+
+The app is a static site with relative paths, so any static host works. To install it as an app:
 
 1. Host `dist/` anywhere that serves HTTPS, such as Netlify Drop, GitHub Pages, Cloudflare Pages, or any static host.
 2. Open it in Chrome on Android and choose **Add to Home screen / Install app**.

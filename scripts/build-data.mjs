@@ -40,7 +40,10 @@ async function fetchCached(name, url, { json = true, optional = false } = {}) {
   const file = path.join(CACHE, name);
   if (!(OFFLINE && fs.existsSync(file))) {
     try {
-      const res = await fetch(url, { headers: { 'User-Agent': 'pogo-companion-data-builder' } });
+      const headers = { 'User-Agent': 'pogo-companion-data-builder' };
+      // On GitHub Actions, authenticate API calls to avoid the shared unauthenticated rate limit
+      if (process.env.GITHUB_TOKEN && url.startsWith('https://api.github.com/')) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+      const res = await fetch(url, { headers });
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
       console.log(`  ↓ ${name}`);
