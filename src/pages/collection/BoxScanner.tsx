@@ -9,7 +9,7 @@ import {
 } from '../../lib/scanner';
 import { useCollection, useMyPokemon, useStored, type Collection, type SavedMon } from '../../lib/storage';
 import type { GameData } from '../../lib/types';
-import { findStillTimes, grabFrame, loadImagePage, loadVideo, type Page, type StillRun } from './scanFrames';
+import { findStillTimes, loadImagePage, loadVideo, videoSource, type FrameSource, type Page, type StillRun } from './scanFrames';
 import { scanImages, scanVideo } from './scanRunner';
 import './scanner.css';
 
@@ -48,7 +48,7 @@ export default function BoxScanner() {
   const [items, setItems] = useState<ScanItem[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const abort = useRef<AbortController | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const videoRef = useRef<FrameSource | null>(null);
   const stillTimes = useRef<StillRun[]>([]);
 
   useEffect(() => { loadLibrary().then(setLib, (e) => setLibError(String(e.message || e))); }, []);
@@ -67,13 +67,13 @@ export default function BoxScanner() {
       setStage('scanning');
       if (isVideo) {
         setProgress({ label: 'Opening video…', value: 0 });
-        const v = await loadVideo(files[0]);
+        const v = videoSource(await loadVideo(files[0]));
         videoRef.current = v;
         setProgress({ label: 'Finding your pauses…', value: 0 });
         const times = await findStillTimes(v, (f) => setProgress({ label: 'Finding your pauses…', value: f }), 0.25, abort.current.signal);
         if (!times.length) throw new Error('No pauses found. Pause for about a second after each scroll so the scanner can read a still frame.');
         stillTimes.current = times;
-        setPreview(await grabFrame(v, times[0].time, 0));
+        setPreview(await v.page(times[0].time, 0));
       } else {
         const imgs = files.filter((f) => f.type.startsWith('image/')).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
         if (!imgs.length) throw new Error('Choose a screen recording or screenshots.');
@@ -203,7 +203,7 @@ function Calibrate({ page, cal, setCal, pages, onScan }: { page: Page; cal: Grid
     if (!c) return;
     c.width = p.width; c.height = p.height;
     const ctx = c.getContext('2d')!;
-    ctx.drawImage(page.canvas, 0, 0);
+    if (page.canvas) ctx.drawImage(page.canvas, 0, 0); else ctx.putImageData(new ImageData(new Uint8ClampedArray(p.data), p.width, p.height), 0, 0);
     if (usable && !redo) {
       ctx.fillStyle = 'rgba(79,142,247,0.10)';
       ctx.fillRect(0, 0, c.width, usable.top); ctx.fillRect(0, usable.bottom, c.width, c.height - usable.bottom);

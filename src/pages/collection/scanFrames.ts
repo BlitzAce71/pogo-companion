@@ -4,7 +4,21 @@ import { rowLuminance, trackSteps, type GridCalibration, type Pixels } from '../
 /** Frames are analysed at this width (phone recordings are scaled down; plenty for 3-column tiles). */
 export const ANALYSIS_WIDTH = 540;
 
-export interface Page { index: number; time: number | null; label: string; pixels: Pixels; canvas: HTMLCanvasElement }
+export interface Page { index: number; time: number | null; label: string; pixels: Pixels; canvas?: HTMLCanvasElement }
+
+/**
+ * Where video frames come from. In the app this is the browser's video player (videoSource); tests can
+ * supply frames decoded some other way. Times are in seconds.
+ */
+export interface FrameSource {
+  duration: number;
+  /** Tiny RGBA thumbnail (48 px wide) — for spotting pauses */
+  tiny(t: number): Promise<Uint8ClampedArray>;
+  /** Brightness profile of the frame (see rowLuminance) — for following the scroll */
+  profile(t: number): Promise<Float32Array>;
+  /** The full frame at the analysis width */
+  page(t: number, index: number): Promise<Page>;
+}
 
 function seek(video: HTMLVideoElement, t: number): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -52,22 +66,17 @@ export interface StillRun { start: number; end: number; time: number }
  * Find the moments the recording is still (your pauses between scrolls).
  * Samples the video every `step` seconds at low resolution and keeps the middle of each still run.
  */
-export async function findStillTimes(video: HTMLVideoElement, onProgress: (f: number) => void, step = 0.25, signal?: AbortSignal): Promise<StillRun[]> {
-  const small = document.createElement('canvas');
-  small.width = 48; small.height = Math.max(48, Math.round((video.videoHeight / video.videoWidth) * 48));
-  const ctx = small.getContext('2d', { willReadFrequently: true })!;
+export async function findStillTimes(source: FrameSource, onProgress: (f: number) => void, step = 0.25, signal?: AbortSignal): Promise<StillRun[]> {
   let prev: Uint8ClampedArray | null = null;
   const diffs: { t: number; d: number }[] = [];
-  for (let t = 0; t <= video.duration; t += step) {
+  for (let t = 0; t <= source.duration; t += step) {
     if (signal?.aborted) throw new Error('Cancelled');
-    await seek(video, t);
-    ctx.drawImage(video, 0, 0, small.width, small.height);
-    const cur = ctx.getImageData(0, 0, small.width, small.height).data;
+    const cur = await source.tiny(t);
     let d = 0;
     if (prev) for (let i = 0; i < cur.length; i += 4) d += Math.abs(cur[i] - prev[i]) + Math.abs(cur[i + 1] - prev[i + 1]) + Math.abs(cur[i + 2] - prev[i + 2]);
     diffs.push({ t, d: prev ? d / (cur.length / 4) : Infinity });
     prev = cur;
-    onProgress(t / video.duration);
+    onProgress(t / source.duration);
   }
   // still = frame barely changed since the previous sample (a quarter-second stop is enough: screen
   // recordings have no motion blur, so any frame where the list isn't moving reads cleanly)
@@ -91,19 +100,13 @@ export interface TrackedFrame { t: number; cum: number; step: number }
  * (~30 fps). Returns the total (pixels at the analysis width, content moved up = positive) and every
  * frame's time, cumulative scroll and its own motion (small = a crisp frame worth reading).
  */
-export async function measureScroll(video: HTMLVideoElement, from: StillRun, to: StillRun, cal: GridCalibration, signal?: AbortSignal): Promise<{ total: number; frames: TrackedFrame[] }> {
-  const canvas = document.createElement('canvas');
-  canvas.width = ANALYSIS_WIDTH; canvas.height = Math.round((video.videoHeight / video.videoWidth) * ANALYSIS_WIDTH);
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+export async function measureScroll(source: FrameSource, from: StillRun, to: StillRun, cal: GridCalibration, signal?: AbortSignal): Promise<{ total: number; frames: TrackedFrame[] }> {
   const profiles: Float32Array[] = [];
   const times: number[] = [];
   const grab = async (t: number) => {
     times.push(t);
     if (signal?.aborted) throw new Error('Cancelled');
-    await seek(video, t);
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const d = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    profiles.push(rowLuminance({ width: d.width, height: d.height, data: d.data }, cal));
+    profiles.push(await source.profile(t));
   };
   const step = 1 / 30;
   await grab(from.end);
@@ -114,6 +117,27 @@ export async function measureScroll(video: HTMLVideoElement, from: StillRun, to:
   let cum = 0;
   steps.forEach((st, i) => { cum += st; frames.push({ t: times[i + 1], cum, step: Math.max(Math.abs(st), Math.abs(steps[i + 1] ?? st)) }); });
   return { total: cum, frames };
+}
+
+/** Frames from a <video> element (seeking, then drawing to a canvas). */
+export function videoSource(video: HTMLVideoElement): FrameSource {
+  const tinyC = document.createElement('canvas');
+  tinyC.width = 48; tinyC.height = Math.max(48, Math.round((video.videoHeight / video.videoWidth) * 48));
+  const tinyCtx = tinyC.getContext('2d', { willReadFrequently: true })!;
+  const big = document.createElement('canvas');
+  big.width = ANALYSIS_WIDTH; big.height = Math.round((video.videoHeight / video.videoWidth) * ANALYSIS_WIDTH);
+  const bigCtx = big.getContext('2d', { willReadFrequently: true })!;
+  return {
+    duration: video.duration,
+    async tiny(t) { await seek(video, t); tinyCtx.drawImage(video, 0, 0, tinyC.width, tinyC.height); return tinyCtx.getImageData(0, 0, tinyC.width, tinyC.height).data; },
+    async profile(t) {
+      await seek(video, t);
+      bigCtx.drawImage(video, 0, 0, big.width, big.height);
+      const d = bigCtx.getImageData(0, 0, big.width, big.height);
+      return rowLuminance({ width: d.width, height: d.height, data: d.data });
+    },
+    page: (t, index) => grabFrame(video, t, index),
+  };
 }
 
 export async function grabFrame(video: HTMLVideoElement, t: number, index: number): Promise<Page> {

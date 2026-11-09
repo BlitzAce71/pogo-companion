@@ -4,7 +4,7 @@ import {
   borderColor, cutoutPreview, findRowPhase, fingerprintRegion, matchFingerprint, pageOverlap, tileRects, tileSignature,
   type Fingerprint, type GridCalibration, type MatchOptions, type MatchResult, type Rect, type SpriteLibrary, type TileSignature,
 } from '../../lib/scanner';
-import { grabFrame, loadImagePage, measureScroll, thumbnail, type Page, type StillRun } from './scanFrames';
+import { loadImagePage, measureScroll, thumbnail, type FrameSource, type Page, type StillRun } from './scanFrames';
 
 export interface RawTile { page: number; label: string; fp: Fingerprint; match: MatchResult; thumb: string; cutout: string; rect: Rect }
 export interface ScanOutput { tiles: RawTile[]; warnings: string[]; pagesRead: number }
@@ -16,11 +16,12 @@ export interface ScanOptions {
   signal?: AbortSignal;
   onProgress?: (label: string, fraction: number) => void;
   /** Make the small diagnostic images (thumbnail + cut-out) for each tile */
-  images?: (canvas: HTMLCanvasElement, p: Page['pixels'], r: Rect, f: Fingerprint) => { thumb: string; cutout: string };
+  images?: (canvas: HTMLCanvasElement | undefined, p: Page['pixels'], r: Rect, f: Fingerprint) => { thumb: string; cutout: string };
 }
 
 function defaultImages(cal: GridCalibration) {
-  return (canvas: HTMLCanvasElement, p: Page['pixels'], r: Rect, f: Fingerprint) => {
+  return (canvas: HTMLCanvasElement | undefined, p: Page['pixels'], r: Rect, f: Fingerprint) => {
+    if (!canvas) return { thumb: '', cutout: '' };
     const tw = cal.pitchX * 0.96, th = cal.pitchY * 0.96;
     const cut = cutoutPreview(p, r, f);
     const c = document.createElement('canvas');
@@ -37,6 +38,9 @@ function makeProcessor(o: ScanOptions, out: ScanOutput, gaps: string[], noOverla
   const { cal } = o;
   const images = o.images || defaultImages(cal);
   let prev: PageState | null = null;
+  // Video: absolute position (list coordinates) of the lowest row read so far — rows above it, on any
+  // earlier page, are already done, even if you scrolled back up to them.
+  let readUpTo = -Infinity;
   return {
     get prev() { return prev; },
     process(page: Page, pos: number | null) {
@@ -47,13 +51,17 @@ function makeProcessor(o: ScanOptions, out: ScanOutput, gaps: string[], noOverla
       const sigs = rects.map((r, k) => (fps[k] ? tileSignature(p, r, cal) : null));
       const rowYs = rects.filter((_, k) => k % cal.columns === 0).map((r) => r.y);
       let skip = 0;
-      if (prev && pos !== null && prev.pos !== null && prev.rowYs.length && rowYs.length) {
-        // Video: we followed the scroll, so which rows repeat is pure geometry
-        const moved = pos - prev.pos;
-        const lastPrev = prev.rowYs[prev.rowYs.length - 1], firstPrev = prev.rowYs[0];
-        skip = rowYs.filter((y) => y + moved <= lastPrev + cal.pitchY / 2 && y + moved >= firstPrev - cal.pitchY / 2).length * cal.columns;
-        const gapRows = Math.round((rowYs[0] + moved - lastPrev) / cal.pitchY) - 1;
-        if (gapRows > 0) gaps.push(`${page.label} (${gapRows} row${gapRows > 1 ? 's' : ''})`);
+      if (pos !== null && rowYs.length) {
+        // Video: we followed the scroll, so a row's position in the whole list is y + pos. Rows at or above
+        // the furthest row already read are repeats (including ones revisited by scrolling back up).
+        const abs = rowYs.map((y) => y + pos);
+        const repeats = abs.filter((a) => a <= readUpTo + cal.pitchY / 2).length;
+        skip = repeats * cal.columns;
+        if (readUpTo > -Infinity && repeats < abs.length) {
+          const gapRows = Math.round((abs[repeats] - readUpTo) / cal.pitchY) - 1;
+          if (gapRows > 0) gaps.push(`${page.label} (${gapRows} row${gapRows > 1 ? 's' : ''})`);
+        }
+        readUpTo = Math.max(readUpTo, abs[abs.length - 1]);
       } else if (prev) {
         // Screenshots: recognise repeated rows by comparing whole tiles (incl. their printed CP)
         const ov = pageOverlap(prev.sigs, sigs, cal.columns);
@@ -77,7 +85,7 @@ function makeProcessor(o: ScanOptions, out: ScanOutput, gaps: string[], noOverla
  * whenever a scroll would carry rows past unseen, also reads the stillest frames in between — so you
  * don't have to stop on every screen.
  */
-export async function scanVideo(video: HTMLVideoElement, pauses: StillRun[], o: ScanOptions): Promise<ScanOutput> {
+export async function scanVideo(video: FrameSource, pauses: StillRun[], o: ScanOptions): Promise<ScanOutput> {
   const { cal } = o;
   const out: ScanOutput = { tiles: [], warnings: [], pagesRead: 0 };
   const gaps: string[] = [], noOverlap: string[] = [];
@@ -91,7 +99,7 @@ export async function scanVideo(video: HTMLVideoElement, pauses: StillRun[], o: 
   const read = async (t: number, pos: number) => {
     if (o.signal?.aborted) throw new Error('Cancelled');
     o.onProgress?.(`Reading ${label(t)} of ${label(video.duration)} · ${out.tiles.length} Pokémon so far`, t / video.duration);
-    const page = await grabFrame(video, t, out.pagesRead);
+    const page = await video.page(t, out.pagesRead);
     page.label = label(t);
     proc.process(page, pos);
   };

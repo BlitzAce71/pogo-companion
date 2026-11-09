@@ -72,7 +72,9 @@ export function borderColor(p: Pixels, r: Rect): [number, number, number] {
  * Foreground mask for a sprite region: pixels that differ from the background, plus any
  * background-coloured "holes" fully enclosed by the sprite (e.g. white bellies on a white tile).
  */
-export function spriteMask(p: Pixels, r: Rect, bg: [number, number, number], threshold = 26): Float32Array {
+// Threshold tuned on real recordings: 13 keeps pale Pokémon (Seel, Goldeen, Galarian Corsola) from
+// fading into the near-white storage background without picking up compression noise.
+export function spriteMask(p: Pixels, r: Rect, bg: [number, number, number], threshold = 13): Float32Array {
   const { w, h } = r;
   const m = new Float32Array(w * h);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
@@ -558,7 +560,7 @@ export function pageOverlap(prev: (TileSignature | null)[], next: (TileSignature
  * Brightness profile of the grid area: mean luminance of each pixel row (centre 80% of the width),
  * used to measure how far the screen scrolled between two video frames.
  */
-export function rowLuminance(p: Pixels, cal: GridCalibration): Float32Array {
+export function rowLuminance(p: Pixels): Float32Array {
   const out = new Float32Array(p.height);
   const xa = Math.round(p.width * 0.1), xb = Math.round(p.width * 0.9);
   for (let y = 0; y < p.height; y++) {
@@ -602,14 +604,28 @@ export function trackScroll(profiles: Float32Array[], cal: GridCalibration): num
 
 /** Per-step scroll between consecutive frames (see trackScroll). steps[i] = motion from frame i to i+1. */
 export function trackSteps(profiles: Float32Array[], cal: GridCalibration): number[] {
-  const window = Math.round(cal.pitchY * 0.45);
+  const window = Math.round(cal.pitchY * 0.45), wide = Math.round(cal.pitchY * 0.95);
+  const top = Math.round(cal.top), bottom = Math.round(cal.bottom);
   const steps: number[] = [];
-  let velocity = 0;
+  let velocity = 0, stillRun = 0;
   for (let i = 1; i < profiles.length; i++) {
-    // You scroll down through the box, so only small backward moves (end-of-list bounce) are possible
-    const { shift } = profileShift(profiles[i - 1], profiles[i], Math.round(cal.top), Math.round(cal.bottom), window, Math.max(0, velocity), Math.round(cal.pitchY * 0.15));
-    steps.push(shift);
-    velocity = shift;
+    const a = profiles[i - 1], b = profiles[i];
+    // Search around the current motion. Mostly you scroll down, so only small backward moves are
+    // allowed unless you're already scrolling back up.
+    const minBack = velocity < 0 ? Math.round(window - velocity) : Math.round(cal.pitchY * 0.15);
+    let r = profileShift(a, b, top, bottom, window, velocity, minBack);
+    // A poor best match means the motion jumped outside the window (e.g. after a dropped frame):
+    // look wider and take a clearly better match nearest the expected motion.
+    if (r.error > 2.5) {
+      const r2 = profileShift(a, b, top, bottom, wide, velocity, Math.round(wide - velocity));
+      if (r2.error < r.error * 0.5) r = r2;
+    }
+    steps.push(r.shift);
+    // Phone recorders sometimes repeat a frame mid-scroll; that isn't the scroll stopping, so keep the
+    // velocity — unless the screen stays identical for a few frames (a real stop).
+    const repeated = Math.abs(r.shift) < 0.5 && r.error < 0.15;
+    stillRun = repeated ? stillRun + 1 : 0;
+    if (!repeated || stillRun >= 3) velocity = r.shift;
   }
   return steps;
 }
