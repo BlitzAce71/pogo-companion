@@ -708,6 +708,27 @@ export function tileRects(p: Pixels, cal: GridCalibration, phase: number): Rect[
   return rects.filter((r) => r.x >= 0 && r.y >= 0 && r.x + r.w <= p.width && r.y + r.h <= p.height);
 }
 
+/**
+ * Whether a tile is faded out: Pokémon fused into Necrozma / Kyurem / Calyrex still show up at the end
+ * of searches, drawn faded, but can't be used in the game. Their CP number is pale grey instead of dark
+ * (darkest CP pixels ~180 brightness vs ~90 on normal tiles). Returns false when no CP text is found
+ * (e.g. the number is hidden under the header), so a tile is never dropped by mistake.
+ */
+export function isFadedTile(p: Pixels, r: Rect, cal: GridCalibration): boolean {
+  const cpY = r.y - (cal.offsetY - cal.boxH / 2) * cal.pitchY; // CP number's centre line
+  const half = cal.pitchY * 0.09;
+  const y0 = Math.max(0, Math.round(cpY - half)), y1 = Math.min(p.height, Math.round(cpY + half));
+  if (y1 - y0 < 4 || y0 < cal.top - half) return false;
+  const lum: number[] = [];
+  for (let y = y0; y < y1; y++) for (let x = Math.max(0, r.x); x < Math.min(p.width, r.x + r.w); x++) {
+    const i = px(p, x, y);
+    lum.push(0.3 * p.data[i] + 0.59 * p.data[i + 1] + 0.11 * p.data[i + 2]);
+  }
+  lum.sort((a, b) => a - b);
+  const darkest = lum[Math.floor(lum.length * 0.01)];
+  return darkest > 140 && darkest < 225; // pale text present, but no dark text
+}
+
 // ---------------------------------------------------------------- stitching pages
 /**
  * Pixel signature of a whole tile (sprite + CP + name) used to recognise the same tile on the next page.

@@ -1,13 +1,13 @@
 // Drives a full scan: turns a recording (or screenshots) into identified tiles. Kept free of React so
 // it can be run and tested on its own.
 import {
-  applyNumberOrder, borderColor, cutoutPreview, eraseScrollHandle, findRowPhase, fingerprintRegion, matchFingerprint, pageOverlap, tileRects, tileSignature,
+  applyNumberOrder, borderColor, cutoutPreview, eraseScrollHandle, findRowPhase, fingerprintRegion, isFadedTile, matchFingerprint, pageOverlap, tileRects, tileSignature,
   type Fingerprint, type GridCalibration, type MatchOptions, type MatchResult, type Rect, type SpriteLibrary, type TileSignature,
 } from '../../lib/scanner';
 import { loadImagePage, measureScroll, thumbnail, type FrameSource, type Page, type StillRun } from './scanFrames';
 
 export interface RawTile { page: number; label: string; fp: Fingerprint; match: MatchResult; thumb: string; cutout: string; rect: Rect }
-export interface ScanOutput { tiles: RawTile[]; warnings: string[]; pagesRead: number }
+export interface ScanOutput { tiles: RawTile[]; warnings: string[]; pagesRead: number; /** faded (fused) Pokémon left out */ faded: number }
 
 export interface ScanOptions {
   lib: SpriteLibrary;
@@ -76,6 +76,7 @@ function makeProcessor(o: ScanOptions, out: ScanOutput, gaps: string[], noOverla
       rects.forEach((r, k) => {
         const f = fps[k];
         if (k < skip || !f) return; // already read, or an empty slot at the end of the box
+        if (isFadedTile(p, r, cal)) { out.faded++; return; } // fused into another Pokémon: not usable
         const im = images(page.canvas, p, r, f);
         out.tiles.push({ page: out.pagesRead, label: page.label, fp: f, match: matchFingerprint(o.lib, f, o.match), rect: r, ...im });
       });
@@ -87,6 +88,7 @@ function makeProcessor(o: ScanOptions, out: ScanOutput, gaps: string[], noOverla
 
 /** After all tiles are read: use number order (if the list is sorted by number) to fix doubtful reads. */
 function finish(out: ScanOutput, o: ScanOptions) {
+  if (out.faded) out.warnings.push(`Left out ${out.faded} faded Pokémon — ones fused into Necrozma, Kyurem or Calyrex, which can’t be used in the game.`);
   if (!o.dexOf) return;
   const n = applyNumberOrder(out.tiles.map((t) => t.match), o.dexOf, o.flagBelow ?? 0.25);
   if (n) out.warnings.push(`Your storage looks sorted by number, so ${n} doubtful read${n > 1 ? 's were' : ' was'} re-picked to fit between ${n > 1 ? 'their' : 'its'} neighbours (still marked for review).`);
@@ -99,7 +101,7 @@ function finish(out: ScanOutput, o: ScanOptions) {
  */
 export async function scanVideo(video: FrameSource, pauses: StillRun[], o: ScanOptions): Promise<ScanOutput> {
   const { cal } = o;
-  const out: ScanOutput = { tiles: [], warnings: [], pagesRead: 0 };
+  const out: ScanOutput = { tiles: [], warnings: [], pagesRead: 0, faded: 0 };
   const gaps: string[] = [], noOverlap: string[] = [];
   const proc = makeProcessor(o, out, gaps, noOverlap);
   // The start and end of the recording count as pauses, so continuous scrolling still gets covered
@@ -146,7 +148,7 @@ export async function scanVideo(video: FrameSource, pauses: StillRun[], o: ScanO
 
 /** Scan screenshots (in order). Repeated rows are recognised by comparing tiles, since there's no motion to follow. */
 export async function scanImages(files: File[], o: ScanOptions): Promise<ScanOutput> {
-  const out: ScanOutput = { tiles: [], warnings: [], pagesRead: 0 };
+  const out: ScanOutput = { tiles: [], warnings: [], pagesRead: 0, faded: 0 };
   const gaps: string[] = [], noOverlap: string[] = [];
   const proc = makeProcessor(o, out, gaps, noOverlap);
   for (let i = 0; i < files.length; i++) {
