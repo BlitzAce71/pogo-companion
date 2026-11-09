@@ -37,6 +37,7 @@ export const ROUTES: RouteDef[] = [
   { path: '/tools/search', page: p(() => import('./pages/tools/SearchStrings')), nav: { group: 'Tools', label: 'Search Strings', icon: '🔎', keywords: 'filter storage cleanup' } },
   // Collection
   { path: '/collection', page: p(() => import('./pages/collection/MyDex')), nav: { group: 'Collection', label: 'My Dex', icon: '✅', keywords: 'living dex shiny lucky hundo checklist' } },
+  { path: '/collection/scan', page: p(() => import('./pages/collection/BoxScanner')), nav: { group: 'Collection', label: 'Box Scanner', icon: '📹', keywords: 'scan video screen recording import storage box automatic' } },
   { path: '/collection/mons', page: p(() => import('./pages/collection/MyPokemon')), nav: { group: 'Collection', label: 'My Pokémon', icon: '🎒', keywords: 'saved ivs box notes' } },
   // Reference
   { path: '/ref/weather', page: p(() => import('./pages/reference/Weather')), nav: { group: 'Reference', label: 'Weather Boosts', icon: '🌦️', keywords: 'weather boost types' } },

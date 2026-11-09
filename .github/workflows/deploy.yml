@@ -31,6 +31,13 @@ jobs:
 
       - run: npm ci
 
+      # Sprite downloads for the Box Scanner library are cached between runs
+      - uses: actions/cache@v4
+        with:
+          path: .cache/icons
+          key: sprite-icons-${{ github.run_id }}
+          restore-keys: sprite-icons-
+
       # Download the latest game master, PvPoke rankings and live snapshots.
       # If a source is down, the build falls back to the data committed in public/data.
       - name: Refresh game data

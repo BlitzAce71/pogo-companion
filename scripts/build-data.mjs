@@ -236,14 +236,16 @@ async function main() {
   const numToMove = Object.fromEntries(Object.entries(moveNum).map(([id, n]) => [Number(n), id]));
   const moveset = (list) => [...new Set((list || []).map((m) => (typeof m === 'number' ? numToMove[m] : m)).filter(Boolean))];
 
-  const imgFor = (dex, formSuffix, kind = 'f') => {
+  const imgFor = (dex, formSuffix, kind = 'f', formFull = null) => {
     const base = `pm${dex}`;
-    if (formSuffix) {
-      const cand = `${base}.${kind}${formSuffix}`;
-      if (assetFiles.has(`${cand}.icon.png`)) return cand;
-      if (!assetFiles.size) return cand;
-    }
-    return base;
+    const cands = [
+      formSuffix && `${base}.${kind}${formSuffix}`,
+      formFull && `${base}.${kind}${formFull}`, // e.g. pm413.fWORMADAM_PLANT
+      base,
+      `${base}.fNORMAL`, // some species only ship a NORMAL-form icon (e.g. Kyurem, Genesect)
+    ].filter(Boolean);
+    if (!assetFiles.size) return cands[0];
+    return cands.find((c) => assetFiles.has(`${c}.icon.png`)) || base;
   };
 
   const sig = (s) => JSON.stringify([s.type, s.type2, s.stats, [...(s.quickMoves || [])].sort(), [...(s.cinematicMoves || [])].sort(), s.eliteQuickMove, s.eliteCinematicMove]);
@@ -329,7 +331,7 @@ async function main() {
       const gmaxVisual = ext?.breadOverrides?.some((o) => o.breadMode === 'BREAD_DOUGH_MODE');
 
       const cls = s.pokemonClass ? s.pokemonClass.replace('POKEMON_CLASS_', '').toLowerCase() : null;
-      const img = imgFor(dex, formSuffix);
+      const img = imgFor(dex, formSuffix, 'f', formFull);
       const entry = {
         id, dex, speciesId: pid, name: nameBase, form: formSuffix, formName,
         types, ...stats,

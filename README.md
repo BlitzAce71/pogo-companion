@@ -41,6 +41,14 @@ A personal Pokémon GO companion web app. It covers live game info, a full Poké
 
 **Collection**: a personal dex checklist (caught, shiny, lucky, hundo, shadow, purified, XXL/XXS, shundo, Dynamax, Gigantamax) and a "My Pokémon" box with IVs, PvP ranks and raid ratings. Includes CSV/JSON export and import.
 
+**Box Scanner** (Collection → Box Scanner): record your screen while scrolling through Pokémon storage, and the app identifies every Pokémon from its sprite, entirely on your device.
+- Each tile is matched against ~3,200 storage icons, including shiny, costume, female and cosmetic variants.
+- Between your pauses, the scanner follows the scroll frame by frame, so pages are stitched together exactly.
+- The in-game search string you used (e.g. `lucky`, `4*`, `!shiny&!costume`) adds attributes and narrows the candidates.
+- Uncertain matches are flagged for a quick review, then imported into My Dex and My Pokémon.
+
+On simulated storage screens it identifies 95–97% of Pokémon correctly, and only about 1 in 200 is wrong without being flagged. It has not yet been calibrated against a real phone recording.
+
 **Reference**: weather boosts, trainer levels and rewards (up to level 80), friendship and buddy levels, medals with a progress tracker, items, and a game mechanics guide (formulas, CPM table, catch rates, IV floors, PvP buffs).
 
 **App**: Ctrl+K / `/` command palette, dark/light themes, backup and restore, and offline support.
