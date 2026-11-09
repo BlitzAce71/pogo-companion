@@ -1,5 +1,5 @@
 // Turning a screen recording (or screenshots) into still "pages" of the storage grid.
-import { rowLuminance, trackScroll, type GridCalibration, type Pixels } from '../../lib/scanner';
+import { rowLuminance, trackSteps, type GridCalibration, type Pixels } from '../../lib/scanner';
 
 /** Frames are analysed at this width (phone recordings are scaled down; plenty for 3-column tiles). */
 export const ANALYSIS_WIDTH = 540;
@@ -69,31 +69,36 @@ export async function findStillTimes(video: HTMLVideoElement, onProgress: (f: nu
     prev = cur;
     onProgress(t / video.duration);
   }
-  // still = frame barely changed since the previous sample
-  const still = diffs.map((x) => x.d < 2.5);
+  // still = frame barely changed since the previous sample (a quarter-second stop is enough: screen
+  // recordings have no motion blur, so any frame where the list isn't moving reads cleanly)
+  const still = diffs.map((x) => x.d < 3.5);
   const runs: StillRun[] = [];
   for (let i = 0; i < still.length; ) {
     if (!still[i]) { i++; continue; }
     let j = i;
     while (j + 1 < still.length && still[j + 1]) j++;
-    // a run of ≥2 still samples (≥ ~0.5 s) counts as a pause; read the frame in the middle of it.
-    // still[i] means frame i matches frame i-1, so the pause really began at sample i-1.
-    if (j - i + 1 >= 2) runs.push({ start: diffs[Math.max(0, i - 1)].t, end: diffs[j].t, time: diffs[Math.floor((i + j + 1) / 2)].t });
+    // still[i] means frame i matches frame i-1, so the pause really began at sample i-1; read the middle
+    runs.push({ start: diffs[Math.max(0, i - 1)].t, end: diffs[j].t, time: diffs[Math.floor((i + j) / 2)].t });
     i = j + 1;
   }
   return runs;
 }
 
+export interface TrackedFrame { t: number; cum: number; step: number }
+
 /**
  * How far the storage list scrolled between two pauses, by following the motion frame by frame
- * (~30 fps). Returns pixels at the analysis width (content moved up = positive).
+ * (~30 fps). Returns the total (pixels at the analysis width, content moved up = positive) and every
+ * frame's time, cumulative scroll and its own motion (small = a crisp frame worth reading).
  */
-export async function measureScroll(video: HTMLVideoElement, from: StillRun, to: StillRun, cal: GridCalibration, signal?: AbortSignal): Promise<number> {
+export async function measureScroll(video: HTMLVideoElement, from: StillRun, to: StillRun, cal: GridCalibration, signal?: AbortSignal): Promise<{ total: number; frames: TrackedFrame[] }> {
   const canvas = document.createElement('canvas');
   canvas.width = ANALYSIS_WIDTH; canvas.height = Math.round((video.videoHeight / video.videoWidth) * ANALYSIS_WIDTH);
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   const profiles: Float32Array[] = [];
+  const times: number[] = [];
   const grab = async (t: number) => {
+    times.push(t);
     if (signal?.aborted) throw new Error('Cancelled');
     await seek(video, t);
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -104,7 +109,11 @@ export async function measureScroll(video: HTMLVideoElement, from: StillRun, to:
   await grab(from.end);
   for (let t = from.end + step; t < to.start; t += step) await grab(t);
   await grab(to.start);
-  return trackScroll(profiles, cal);
+  const steps = trackSteps(profiles, cal);
+  const frames: TrackedFrame[] = [{ t: times[0], cum: 0, step: 0 }];
+  let cum = 0;
+  steps.forEach((st, i) => { cum += st; frames.push({ t: times[i + 1], cum, step: Math.max(Math.abs(st), Math.abs(steps[i + 1] ?? st)) }); });
+  return { total: cum, frames };
 }
 
 export async function grabFrame(video: HTMLVideoElement, t: number, index: number): Promise<Page> {

@@ -4,12 +4,13 @@ import { Card, Empty, Field, PageHeader, PokeImg, PokemonPicker, Segmented, Sele
 import { displayName, useData } from '../../lib/data';
 import { fmt } from '../../lib/format';
 import {
-  answerKey, attributesFromSearch, borderColor, cutoutPreview, excludedFromSearch, findRowPhase, fingerprintRegion, learnRowTemplate, loadLibrary, matchFingerprint, pageOverlap, tileRects, tileSignature, validCalibration,
-  type Candidate, type Fingerprint, type GridCalibration, type TileSignature, type ScanAttributes, type SpriteLibrary, type SpriteRef,
+  answerKey, attributesFromSearch, autoFitBox, borderColor, excludedFromSearch, findRowPhase, learnRowTemplate, loadLibrary, tileRects, validCalibration,
+  type Candidate, type Fingerprint, type GridCalibration, type ScanAttributes, type SpriteLibrary, type SpriteRef,
 } from '../../lib/scanner';
 import { useCollection, useMyPokemon, useStored, type Collection, type SavedMon } from '../../lib/storage';
 import type { GameData } from '../../lib/types';
-import { findStillTimes, grabFrame, loadImagePage, loadVideo, measureScroll, thumbnail, type Page, type StillRun } from './scanFrames';
+import { findStillTimes, grabFrame, loadImagePage, loadVideo, type Page, type StillRun } from './scanFrames';
+import { scanImages, scanVideo } from './scanRunner';
 import './scanner.css';
 
 const REVIEW_BELOW = 0.25; // confidence under this is flagged for review
@@ -99,70 +100,20 @@ export default function BoxScanner() {
       return true;
     };
     const prior = (r: SpriteRef) => (data.byId[r.id]?.megaOf ? 10 : 0) + (r.costume ? 2 : 0);
-    const out: ScanItem[] = [];
-    const warn: string[] = [];
-    const noOverlap: string[] = [];
-    let prevSigs: (TileSignature | null)[] | null = null;
-    let prevRowYs: number[] = [];
-    const gaps: string[] = [];
-    let uid = 0;
     try {
-      const sources: (() => Promise<Page>)[] = isVideo
-        ? stillTimes.current.map((run, i) => () => grabFrame(videoRef.current!, run.time, i))
-        : files.filter((f) => f.type.startsWith('image/')).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })).map((f, i) => () => loadImagePage(f, i));
-      for (let i = 0; i < sources.length; i++) {
-        if (abort.current.signal.aborted) throw new Error('Cancelled');
-        setProgress({ label: `Reading page ${i + 1} of ${sources.length} · ${fmt(out.length)} Pokémon so far`, value: i / sources.length });
-        await new Promise((r) => setTimeout(r, 0));
-        const page = await sources[i]();
-        const p = page.pixels;
-        const gapBg = borderColor(p, { x: Math.round(cal.x0 + cal.pitchX / 2 - 2), y: cal.top, w: 4, h: Math.max(4, cal.bottom - cal.top) });
-        const phase = findRowPhase(p, cal, gapBg);
-        const rects = tileRects(p, cal, phase);
-        const fps = rects.map((r) => fingerprintRegion(p, r));
-        const sigs = rects.map((r, k) => (fps[k] ? tileSignature(p, r, cal) : null));
-        let skip = 0;
-        const rowYs = rects.filter((_, k) => k % cal.columns === 0).map((r) => r.y);
-        if (prevSigs && isVideo && prevRowYs.length && rowYs.length) {
-          // Video: follow the scroll between the two pauses and work out geometrically which rows repeat
-          setProgress({ label: `Following the scroll into page ${i + 1} of ${sources.length} · ${fmt(out.length)} Pokémon so far`, value: i / sources.length });
-          const moved = await measureScroll(videoRef.current!, stillTimes.current[i - 1], stillTimes.current[i], cal, abort.current.signal);
-          const lastPrev = prevRowYs[prevRowYs.length - 1], firstPrev = prevRowYs[0];
-          // a row at y on this page was at y + moved on the previous one
-          const repeatRows = rowYs.filter((y) => y + moved <= lastPrev + cal.pitchY / 2 && y + moved >= firstPrev - cal.pitchY / 2).length;
-          skip = repeatRows * cal.columns;
-          const gapRows = Math.round((rowYs[0] + moved - lastPrev) / cal.pitchY) - 1;
-          if (gapRows > 0) gaps.push(`${page.label} (${gapRows} row${gapRows > 1 ? 's' : ''})`);
-        } else if (prevSigs) {
-          // Screenshots: recognise repeated rows by comparing tiles (incl. their printed CP)
-          const ov = pageOverlap(prevSigs, sigs, cal.columns);
-          skip = ov.overlap;
-          if (!ov.overlap) noOverlap.push(page.label);
-        }
-        prevRowYs = rowYs;
-        rects.forEach((r, k) => {
-          if (k < skip) return;
-          const f = fps[k];
-          if (!f) return; // empty slot (end of the box)
-          const m = matchFingerprint(lib, f, { filter, prior });
-          const tw = cal.pitchX * 0.96, th = cal.pitchY * 0.96;
-          out.push({
-            uid: uid++, page: i, fp: f, alternatives: m.alternatives, confidence: m.confidence,
-            answer: m.best ? toAnswer(m.best.ref) : null,
-            thumb: thumbnail(page.canvas, r.x + r.w / 2 - tw / 2, r.y + r.h / 2 - th / 2, tw, th),
-            cutout: toDataUrl(cutoutPreview(p, r, f)),
-          });
-        });
-        prevSigs = sigs;
-      }
-      if (gaps.length) warn.push(`Rows were scrolled past without ever being fully on screen at ${gaps.slice(0, 8).join(', ')}${gaps.length > 8 ? '…' : ''}. Those Pokémon are missing from this scan — re-record those parts more slowly.`);
-      if (noOverlap.length) warn.push(`${noOverlap.length} of ${sources.length} pages didn't repeat a row from the page before (at ${noOverlap.slice(0, 6).join(', ')}${noOverlap.length > 6 ? '…' : ''}). That's fine if you scrolled about one screen there — but if you flicked further, Pokémon in between were never on screen. Scrolling a little less than a full screen avoids this.`);
-      setItems(out);
-      setWarnings(warn);
+      const opts = { lib, cal, match: { filter, prior }, signal: abort.current.signal, onProgress: (label: string, value: number) => setProgress({ label, value }) };
+      const res = isVideo
+        ? await scanVideo(videoRef.current!, stillTimes.current, opts)
+        : await scanImages(files.filter((f) => f.type.startsWith('image/')).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })), opts);
+      setItems(res.tiles.map((t, uid) => ({
+        uid, page: t.page, fp: t.fp, alternatives: t.match.alternatives, confidence: t.match.confidence,
+        answer: t.match.best ? toAnswer(t.match.best.ref) : null, thumb: t.thumb, cutout: t.cutout,
+      })));
+      setWarnings(res.warnings);
       setStage('review');
     } catch (e) {
       toast.show(String((e as Error).message || e));
-      if (out.length) { setItems(out); setWarnings(warn); setStage('review'); } else setStage('calibrate');
+      setStage('calibrate');
     }
   };
 
@@ -206,7 +157,7 @@ function Setup({ files, setFiles, search, setSearch, attrs, excluded, onStart, r
         <ol className="scan-steps">
           <li>In Pokémon GO open <b>Pokémon storage</b>. Sort by <b>Number</b> so later scans line up the same way.</li>
           <li>Optionally type a search to scan one group at a time (e.g. <code>lucky</code>, <code>shiny</code>, <code>4*</code>), or leave it empty for everything.</li>
-          <li>Start your phone’s <b>screen recorder</b>, scroll down <b>a little less than one screen</b> at a time, and <b>pause about a second</b> after each scroll. Keeping the last row at the top of the next screen lets the scanner stitch pages together reliably.</li>
+          <li>Start your phone’s <b>screen recorder</b> and scroll down at a steady, moderate pace — about a screen every second or two. You don’t need to stop on each screen: the scanner follows the scroll and reads the crispest frames itself. Brief pauses help; fast flicks can skip rows (it will tell you where).</li>
           <li>Send the recording to this computer and choose it below. A <b>video is best</b>: the scanner follows the scroll itself, so it never double-counts or skips. Screenshots work too (select them all at once, in order), but identical neighbours can be miscounted at page edges.</li>
         </ol>
       </Card>
@@ -216,8 +167,8 @@ function Setup({ files, setFiles, search, setSearch, attrs, excluded, onStart, r
             <input className="input" type="file" accept="video/*,image/*" multiple onChange={(e) => setFiles([...(e.target.files || [])])} />
           </Field>
           {files.length > 0 && <div className="small muted">{files.length === 1 ? files[0].name : `${files.length} files`} · {(files.reduce((s, f) => s + f.size, 0) / 1e6).toFixed(1)} MB</div>}
-          <Field label="Search string you used in the game (optional)" hint="Every Pokémon in this scan gets these attributes. Excluded terms like !shiny and !costume also make recognition more accurate.">
-            <input className="input mono" placeholder="e.g. lucky   or   !shiny&!costume&!lucky" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <Field label="Search string you used in the game (optional)" hint="Every Pokémon in this scan gets these attributes. Excluded terms like !shiny and !costume make recognition more accurate, and !background avoids special backgrounds behind sprites.">
+            <input className="input mono" placeholder="e.g. lucky   or   !shiny&!costume&!background" value={search} onChange={(e) => setSearch(e.target.value)} />
           </Field>
           {(Object.keys(attrs).length > 0 || excluded.size > 0) && (
             <div className="chips">
@@ -286,7 +237,10 @@ function Calibrate({ page, cal, setCal, pages, onScan }: { page: Page; cal: Grid
       // search bar. Rows that scroll partly under it are skipped (they reappear on the next page).
       top: Math.max(0, Math.round(Math.min(a.y, d.y) - pitchY * 0.08)), bottom: Math.round(p.height * 0.88),
     };
-    setCal({ ...base, rowTemplate: learnRowTemplate(p, base) });
+    // Fit each box exactly between the CP number and the name on this frame (falls back to the defaults)
+    const fit = autoFitBox(p, base);
+    const fitted = fit ? { ...base, ...fit, top: Math.max(0, Math.round((fit.y0 ?? base.y0) - (fit.pitchY ?? base.pitchY) * 0.08)) } : base;
+    setCal({ ...fitted, rowTemplate: learnRowTemplate(p, fitted) });
     setClicks([]);
     setRedo(false);
   };
@@ -298,7 +252,7 @@ function Calibrate({ page, cal, setCal, pages, onScan }: { page: Page; cal: Grid
       <Card title="3. Line up the grid" className="sticky-side">
         {redo ? (
           <div className="col" style={{ gap: 10 }}>
-            <p className="small">Click the <b>CP number of the first Pokémon</b> (top-left), then the <b>CP number of the Pokémon one row down and one column right</b>. This tells the scanner your screen’s grid spacing. It’s remembered for next time.</p>
+            <p className="small">Click the <b>CP number of the first Pokémon</b> (top-left), then the <b>CP number of the Pokémon one row down and one column right</b>. Roughly is fine — the scanner then measures the exact grid from the CP numbers and names itself. It’s remembered for next time.</p>
             <div className="badge accent">{clicks.length === 0 ? 'Click the first CP number' : 'Now click the CP number diagonally below-right'}</div>
             {usable && <button className="btn sm" onClick={() => { setRedo(false); setClicks([]); }}>Keep previous calibration</button>}
           </div>

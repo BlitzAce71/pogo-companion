@@ -107,11 +107,13 @@ function dropSmallParts(m: Float32Array, w: number, h: number) {
   const label = new Int32Array(w * h).fill(-1);
   const sizes: number[] = [];
   const edge: boolean[] = [];
+  const topBottom: boolean[] = [];
+  const boxes: [number, number, number, number][] = [];
   const stack: number[] = [];
   for (let start = 0; start < w * h; start++) {
     if (m[start] < 0.5 || label[start] >= 0) continue;
     const id = sizes.length;
-    let size = 0, touches = false;
+    let size = 0, touches = false, tb = false, bx0 = w, by0 = h, bx1 = 0, by1 = 0;
     stack.push(start);
     label[start] = id;
     while (stack.length) {
@@ -119,6 +121,8 @@ function dropSmallParts(m: Float32Array, w: number, h: number) {
       size++;
       const x = k % w, y = (k / w) | 0;
       if (x === 0 || y === 0 || x === w - 1 || y === h - 1) touches = true;
+      if (y === 0 || y === h - 1) tb = true;
+      if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y;
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
         const xx = x + dx, yy = y + dy;
         if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
@@ -128,12 +132,27 @@ function dropSmallParts(m: Float32Array, w: number, h: number) {
     }
     sizes.push(size);
     edge.push(touches);
+    topBottom.push(tb);
+    boxes.push([bx0, by0, bx1, by1]);
   }
   if (sizes.length < 2) return;
   // Edge-touching blobs other than the main one are intruders unless they're big (the favourite star
   // can be ~20% the size of a small Pokémon like Caterpie, so the bar is half the main blob).
   const largest = Math.max(...sizes), keepEdge = largest * 0.5;
-  for (let k = 0; k < w * h; k++) { const id = label[k]; if (id >= 0 && edge[id] && sizes[id] < keepEdge && sizes[id] !== largest) m[k] = 0; }
+  // Text cut by the top or bottom of the box (CP digits, the name) is wide and short. It's never the
+  // Pokémon, even when it's the biggest blob next to a tiny sprite — as long as something else is there.
+  const isText = sizes.map((_, id) => {
+    if (!topBottom[id]) return false;
+    const [x0, y0, x1, y1] = boxes[id], bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+    return bh <= h * 0.3 && bw >= bh * 1.3;
+  });
+  const others = sizes.reduce((s, n, id) => (isText[id] ? s : s + n), 0);
+  for (let k = 0; k < w * h; k++) {
+    const id = label[k];
+    if (id < 0) continue;
+    if (isText[id] && others >= 20) { m[k] = 0; continue; }
+    if (edge[id] && sizes[id] < keepEdge && sizes[id] !== largest) m[k] = 0;
+  }
 }
 
 /** Fingerprint a sprite inside rect r of an image (same algorithm as build-sprites.mjs). */
@@ -295,6 +314,80 @@ export function validCalibration(c: GridCalibration | null | undefined, width?: 
   if (!nums.every((n) => typeof n === 'number' && Number.isFinite(n))) return false;
   if (c.pitchX < 20 || c.pitchY < 20 || c.boxW <= 0 || c.boxH <= 0 || c.bottom <= c.top || c.columns < 1) return false;
   return width === undefined || c.width === width;
+}
+
+const isTextPx = (p: Pixels, x: number, y: number) => {
+  const i = px(p, x, y), r = p.data[i], g = p.data[i + 1], b = p.data[i + 2];
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+  return mx < 130 && mx - mn < 45; // dark slate-grey text (CP numbers, names)
+};
+
+/** Rows [a, b] of the text band nearest y (counting text pixels across the given x ranges). */
+function textBandNear(p: Pixels, y: number, xs: [number, number][], minPerRow: number, search: number): [number, number] | null {
+  const count = (yy: number) => {
+    if (yy < 0 || yy >= p.height) return 0;
+    let n = 0;
+    for (const [xa, xb] of xs) for (let x = Math.max(0, xa); x < Math.min(p.width, xb); x++) if (isTextPx(p, x, yy)) n++;
+    return n;
+  };
+  const isRow = (yy: number) => count(yy) >= minPerRow;
+  let c = -1;
+  for (let d = 0; d <= search && c < 0; d++) { if (isRow(y + d)) c = y + d; else if (isRow(y - d)) c = y - d; }
+  if (c < 0) return null;
+  let a = c, b = c;
+  while (a > c - search && (isRow(a - 1) || isRow(a - 2))) a--;
+  while (b < c + search && (isRow(b + 1) || isRow(b + 2))) b++;
+  return [a, b];
+}
+
+/**
+ * Refine a rough calibration from the frame itself, so clicks only need to land roughly on the two CP
+ * numbers: measures the CP-label columns (x positions & spacing), the next row's CP labels (row spacing),
+ * and fits the picture box between the CP number and the name. Returns null if text can't be found.
+ */
+export function autoFitBox(p: Pixels, cal: GridCalibration): Partial<GridCalibration> | null {
+  const y0 = Math.round(cal.y0);
+  const full: [number, number][] = [[0, p.width]];
+  // 1. CP band of the first row, across the whole width
+  const band = textBandNear(p, y0, full, 6, Math.round(cal.pitchY * 0.12));
+  if (!band) return null;
+  const [a, b] = band;
+  // 2. Column clusters of text within that band → tile centres
+  const colCount = new Int32Array(p.width);
+  for (let y = a; y <= b; y++) for (let x = 0; x < p.width; x++) if (isTextPx(p, x, y)) colCount[x]++;
+  const clusters: { x0: number; x1: number; n: number }[] = [];
+  const gap = Math.max(8, cal.pitchX * 0.12);
+  for (let x = 0; x < p.width; x++) {
+    if (!colCount[x]) continue;
+    const last = clusters[clusters.length - 1];
+    if (last && x - last.x1 <= gap) { last.x1 = x; last.n += colCount[x]; } else clusters.push({ x0: x, x1: x, n: colCount[x] });
+  }
+  const labels = clusters.filter((c) => c.n >= 12 && c.x1 - c.x0 >= 8).map((c) => (c.x0 + c.x1) / 2);
+  let x0 = cal.x0, pitchX = cal.pitchX;
+  if (labels.length >= cal.columns) {
+    // pick the run of `columns` labels whose first is closest to the rough x0
+    let bestI = 0;
+    for (let i = 0; i + cal.columns <= labels.length; i++) if (Math.abs(labels[i] - cal.x0) < Math.abs(labels[bestI] - cal.x0)) bestI = i;
+    const run = labels.slice(bestI, bestI + cal.columns);
+    const spacing = (run[run.length - 1] - run[0]) / (cal.columns - 1);
+    if (spacing > cal.pitchX * 0.6 && spacing < cal.pitchX * 1.5) { x0 = run[0]; pitchX = spacing; }
+  }
+  const cols: [number, number][] = Array.from({ length: cal.columns }, (_, c) => [Math.round(x0 + c * pitchX - pitchX * 0.38), Math.round(x0 + c * pitchX + pitchX * 0.38)]);
+  // 3. Row spacing from the next row's CP band
+  let pitchY = cal.pitchY;
+  const next = textBandNear(p, Math.round(a + cal.pitchY), cols, 4 * cal.columns, Math.round(cal.pitchY * 0.2));
+  if (next && next[0] - a > cal.pitchY * 0.75 && next[0] - a < cal.pitchY * 1.3) pitchY = next[0] - a;
+  // 4. Name band: first ≥4-row text run in the lower part of the tile
+  const textRow = (y: number) => { let n = 0; for (const [xa, xb] of cols) for (let x = Math.max(0, xa); x < Math.min(p.width, xb); x++) if (isTextPx(p, x, y)) n++; return n >= 4 * cal.columns; };
+  let nameTop = -1;
+  for (let y = Math.round(b + pitchY * 0.3); y < a + pitchY * 0.9; y++) if (textRow(y) && textRow(y + 1) && textRow(y + 2) && textRow(y + 3)) { nameTop = y; break; }
+  const anchor = (a + b) / 2;
+  const out: Partial<GridCalibration> = { x0, pitchX, pitchY, y0: anchor };
+  if (nameTop > 0) {
+    const top = b + Math.max(2, pitchY * 0.015), bottom = nameTop - Math.max(2, pitchY * 0.015);
+    if (bottom - top >= pitchY * 0.25) { out.offsetY = ((top + bottom) / 2 - anchor) / pitchY; out.boxH = (bottom - top) / pitchY; }
+  }
+  return out;
 }
 
 /** Foreground "mass" per y inside the sprite columns, for finding where rows sit after scrolling. */
@@ -504,15 +597,21 @@ export function profileShift(a: Float32Array, b: Float32Array, top: number, bott
  * because touch scrolling speeds up and slows down smoothly). Returns pixels scrolled (content moved up).
  */
 export function trackScroll(profiles: Float32Array[], cal: GridCalibration): number {
+  return trackSteps(profiles, cal).reduce((s, x) => s + x, 0);
+}
+
+/** Per-step scroll between consecutive frames (see trackScroll). steps[i] = motion from frame i to i+1. */
+export function trackSteps(profiles: Float32Array[], cal: GridCalibration): number[] {
   const window = Math.round(cal.pitchY * 0.45);
-  let total = 0, velocity = 0;
+  const steps: number[] = [];
+  let velocity = 0;
   for (let i = 1; i < profiles.length; i++) {
     // You scroll down through the box, so only small backward moves (end-of-list bounce) are possible
     const { shift } = profileShift(profiles[i - 1], profiles[i], Math.round(cal.top), Math.round(cal.bottom), window, Math.max(0, velocity), Math.round(cal.pitchY * 0.15));
-    total += shift;
+    steps.push(shift);
     velocity = shift;
   }
-  return total;
+  return steps;
 }
 
 // ---------------------------------------------------------------- search-string attributes
