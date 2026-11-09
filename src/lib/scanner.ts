@@ -9,7 +9,7 @@ export interface Rect { x: number; y: number; w: number; h: number }
 export interface SpriteRef { id: string; costume?: string; shiny: boolean; female?: boolean; variant?: string; aspect: number }
 export interface SpriteLibrary { size: number; refs: SpriteRef[]; fp: Uint8Array; coarse: Float32Array }
 
-export interface Fingerprint { fp: Uint8Array; aspect: number; coverage: number }
+export interface Fingerprint { fp: Uint8Array; aspect: number; coverage: number; /** outline used, within the box: x0, y0, x1, y1 */ bbox?: [number, number, number, number] }
 export interface Candidate { ref: SpriteRef; index: number; score: number }
 export interface MatchResult { best: Candidate | null; alternatives: Candidate[]; confidence: number }
 
@@ -171,7 +171,28 @@ export function fingerprintRegion(p: Pixels, r: Rect, bg?: [number, number, numb
     fp[c * 4 + 3] = Math.round(al * 255);
     cov += al;
   }
-  return { fp, aspect: bw / bh, coverage: cov / (SIZE * SIZE) };
+  return { fp, aspect: bw / bh, coverage: cov / (SIZE * SIZE), bbox: [x0, y0, x1, y1] };
+}
+
+/**
+ * Diagnostic image of what the scanner cut out of a box: pixels it treated as background are dimmed,
+ * and the outline it used for the Pokémon is drawn in magenta.
+ */
+export function cutoutPreview(p: Pixels, r: Rect, f: Fingerprint | null): { w: number; h: number; data: Uint8ClampedArray } {
+  const m = spriteMask(p, r, borderColor(p, r));
+  const { w, h } = r;
+  const data = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = px(p, r.x + x, r.y + y), o = (y * w + x) * 4, a = m[y * w + x] >= 0.5 ? 1 : 0.22;
+    data[o] = p.data[i] * a + 40 * (1 - a); data[o + 1] = p.data[i + 1] * a + 40 * (1 - a); data[o + 2] = p.data[i + 2] * a + 48 * (1 - a); data[o + 3] = 255;
+  }
+  if (f?.bbox) {
+    const [x0, y0, x1, y1] = f.bbox;
+    const dot = (x: number, y: number) => { const o = (y * w + x) * 4; data[o] = 255; data[o + 1] = 0; data[o + 2] = 200; };
+    for (let x = x0; x <= x1; x++) { dot(x, y0); dot(x, y1); }
+    for (let y = y0; y <= y1; y++) { dot(x0, y); dot(x1, y); }
+  }
+  return { w, h, data };
 }
 
 // ---------------------------------------------------------------- matching

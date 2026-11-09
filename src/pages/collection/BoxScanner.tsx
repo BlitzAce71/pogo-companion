@@ -4,7 +4,7 @@ import { Card, Empty, Field, PageHeader, PokeImg, PokemonPicker, Segmented, Sele
 import { displayName, useData } from '../../lib/data';
 import { fmt } from '../../lib/format';
 import {
-  answerKey, attributesFromSearch, borderColor, excludedFromSearch, findRowPhase, fingerprintRegion, learnRowTemplate, loadLibrary, matchFingerprint, pageOverlap, tileRects, tileSignature, validCalibration,
+  answerKey, attributesFromSearch, borderColor, cutoutPreview, excludedFromSearch, findRowPhase, fingerprintRegion, learnRowTemplate, loadLibrary, matchFingerprint, pageOverlap, tileRects, tileSignature, validCalibration,
   type Candidate, type Fingerprint, type GridCalibration, type TileSignature, type ScanAttributes, type SpriteLibrary, type SpriteRef,
 } from '../../lib/scanner';
 import { useCollection, useMyPokemon, useStored, type Collection, type SavedMon } from '../../lib/storage';
@@ -15,10 +15,23 @@ import './scanner.css';
 const REVIEW_BELOW = 0.25; // confidence under this is flagged for review
 
 interface Answer { id: string; costume?: string; shiny: boolean; female?: boolean }
-interface ScanItem { uid: number; thumb: string; page: number; fp: Fingerprint; alternatives: Candidate[]; confidence: number; answer: Answer | null; edited?: boolean }
+interface ScanItem { uid: number; thumb: string; cutout: string; page: number; fp: Fingerprint; alternatives: Candidate[]; confidence: number; answer: Answer | null; edited?: boolean }
 type Stage = 'setup' | 'calibrate' | 'scanning' | 'review';
 
 const toAnswer = (r: SpriteRef): Answer => ({ id: r.id, costume: r.costume, shiny: r.shiny, female: r.female });
+
+/** RGBA pixels → PNG data URL (small diagnostic images) */
+function toDataUrl(img: { w: number; h: number; data: Uint8ClampedArray }): string {
+  const c = document.createElement('canvas');
+  c.width = img.w; c.height = img.h;
+  c.getContext('2d')!.putImageData(new ImageData(img.data, img.w, img.h), 0, 0);
+  return c.toDataURL('image/png');
+}
+function fingerprintUrl(fp: Uint8Array): string {
+  const data = new Uint8ClampedArray(16 * 16 * 4);
+  for (let i = 0; i < 256; i++) { const a = fp[i * 4 + 3] / 255; for (let c = 0; c < 3; c++) data[i * 4 + c] = fp[i * 4 + c] * a + 40 * (1 - a); data[i * 4 + 3] = 255; }
+  return toDataUrl({ w: 16, h: 16, data });
+}
 
 export default function BoxScanner() {
   const data = useData();
@@ -137,6 +150,7 @@ export default function BoxScanner() {
             uid: uid++, page: i, fp: f, alternatives: m.alternatives, confidence: m.confidence,
             answer: m.best ? toAnswer(m.best.ref) : null,
             thumb: thumbnail(page.canvas, r.x + r.w / 2 - tw / 2, r.y + r.h / 2 - th / 2, tw, th),
+            cutout: toDataUrl(cutoutPreview(p, r, f)),
           });
         });
         prevSigs = sigs;
@@ -394,6 +408,14 @@ function EditDialog({ data, item, onClose, onSave, onRemove }: { data: GameData;
             <AnswerSprite data={data} a={a} size={80} />
             <b>{answerName(data, a)}</b>
           </div>
+          <details className="scan-debug">
+            <summary className="small muted">What the scanner saw</summary>
+            <div className="row" style={{ gap: 14, marginTop: 8, alignItems: 'flex-start' }}>
+              <figure><img src={item.cutout} alt="" style={{ height: 120, imageRendering: 'pixelated' }} /><figcaption className="tiny faint">Cut-out (dim = background, pink = outline)</figcaption></figure>
+              <figure><img src={fingerprintUrl(item.fp.fp)} alt="" style={{ width: 96, height: 96, imageRendering: 'pixelated' }} /><figcaption className="tiny faint">Fingerprint</figcaption></figure>
+              <div className="tiny faint num">shape {item.fp.aspect.toFixed(2)} · fill {Math.round(item.fp.coverage * 100)}%<br />confidence {Math.round(item.confidence * 100)}%</div>
+            </div>
+          </details>
           <div>
             <div className="field-label" style={{ marginBottom: 6 }}>Closest matches</div>
             <div className="row" style={{ gap: 6 }}>
