@@ -1,7 +1,7 @@
 // Drives a full scan: turns a recording (or screenshots) into identified tiles. Kept free of React so
 // it can be run and tested on its own.
 import {
-  borderColor, cutoutPreview, findRowPhase, fingerprintRegion, matchFingerprint, pageOverlap, tileRects, tileSignature,
+  applyNumberOrder, borderColor, cutoutPreview, eraseScrollHandle, findRowPhase, fingerprintRegion, matchFingerprint, pageOverlap, tileRects, tileSignature,
   type Fingerprint, type GridCalibration, type MatchOptions, type MatchResult, type Rect, type SpriteLibrary, type TileSignature,
 } from '../../lib/scanner';
 import { loadImagePage, measureScroll, thumbnail, type FrameSource, type Page, type StillRun } from './scanFrames';
@@ -15,6 +15,10 @@ export interface ScanOptions {
   match: MatchOptions;
   signal?: AbortSignal;
   onProgress?: (label: string, fraction: number) => void;
+  /** Pokédex number of a Pokémon id — enables number-order checking (for storage sorted by number) */
+  dexOf?: (id: string) => number;
+  /** Confidence below which a tile is flagged for review */
+  flagBelow?: number;
   /** Make the small diagnostic images (thumbnail + cut-out) for each tile */
   images?: (canvas: HTMLCanvasElement | undefined, p: Page['pixels'], r: Rect, f: Fingerprint) => { thumb: string; cutout: string };
 }
@@ -45,6 +49,7 @@ function makeProcessor(o: ScanOptions, out: ScanOutput, gaps: string[], noOverla
     get prev() { return prev; },
     process(page: Page, pos: number | null) {
       const p = page.pixels;
+      eraseScrollHandle(p);
       const gapBg = borderColor(p, { x: Math.round(cal.x0 + cal.pitchX / 2 - 2), y: cal.top, w: 4, h: Math.max(4, cal.bottom - cal.top) });
       const rects = tileRects(p, cal, findRowPhase(p, cal, gapBg));
       const fps = rects.map((r) => fingerprintRegion(p, r));
@@ -78,6 +83,13 @@ function makeProcessor(o: ScanOptions, out: ScanOutput, gaps: string[], noOverla
       out.pagesRead++;
     },
   };
+}
+
+/** After all tiles are read: use number order (if the list is sorted by number) to fix doubtful reads. */
+function finish(out: ScanOutput, o: ScanOptions) {
+  if (!o.dexOf) return;
+  const n = applyNumberOrder(out.tiles.map((t) => t.match), o.dexOf, o.flagBelow ?? 0.25);
+  if (n) out.warnings.push(`Your storage looks sorted by number, so ${n} doubtful read${n > 1 ? 's were' : ' was'} re-picked to fit between ${n > 1 ? 'their' : 'its'} neighbours (still marked for review).`);
 }
 
 /**
@@ -127,6 +139,7 @@ export async function scanVideo(video: FrameSource, pauses: StillRun[], o: ScanO
     pausePos = endPos;
     await read(runs[i].time, pausePos);
   }
+  finish(out, o);
   if (gaps.length) out.warnings.push(`Rows went by too fast to read near ${gaps.slice(0, 8).join(', ')}${gaps.length > 8 ? '…' : ''}. Those Pokémon are missing from this scan — scroll a little slower there.`);
   return out;
 }
@@ -142,6 +155,7 @@ export async function scanImages(files: File[], o: ScanOptions): Promise<ScanOut
     await new Promise((r) => setTimeout(r, 0));
     proc.process(await loadImagePage(files[i], i), null);
   }
+  finish(out, o);
   if (noOverlap.length) out.warnings.push(`${noOverlap.length} of ${files.length} screenshots didn't repeat a row from the one before (${noOverlap.slice(0, 6).join(', ')}${noOverlap.length > 6 ? '…' : ''}). That's fine if you scrolled about one screen there — otherwise some Pokémon were never captured.`);
   return out;
 }

@@ -101,7 +101,7 @@ export default function BoxScanner() {
     };
     const prior = (r: SpriteRef) => (data.byId[r.id]?.megaOf ? 10 : 0) + (r.costume ? 2 : 0);
     try {
-      const opts = { lib, cal, match: { filter, prior }, signal: abort.current.signal, onProgress: (label: string, value: number) => setProgress({ label, value }) };
+      const opts = { lib, cal, match: { filter, prior }, dexOf: (id: string) => data.byId[id]?.dex ?? 0, flagBelow: REVIEW_BELOW, signal: abort.current.signal, onProgress: (label: string, value: number) => setProgress({ label, value }) };
       const res = isVideo
         ? await scanVideo(videoRef.current!, stillTimes.current, opts)
         : await scanImages(files.filter((f) => f.type.startsWith('image/')).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })), opts);

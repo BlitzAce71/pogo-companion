@@ -9,9 +9,17 @@ export interface Rect { x: number; y: number; w: number; h: number }
 export interface SpriteRef { id: string; costume?: string; shiny: boolean; female?: boolean; variant?: string; aspect: number }
 export interface SpriteLibrary { size: number; refs: SpriteRef[]; fp: Uint8Array; coarse: Float32Array }
 
-export interface Fingerprint { fp: Uint8Array; aspect: number; coverage: number; /** outline used, within the box: x0, y0, x1, y1 */ bbox?: [number, number, number, number] }
+export interface Fingerprint {
+  fp: Uint8Array; aspect: number; coverage: number;
+  /** outline used, within the box: x0, y0, x1, y1 */ bbox?: [number, number, number, number];
+  /** tile background colour (parts of a Pokémon that match it can't be seen, so aren't held against a match) */ bg?: [number, number, number];
+}
 export interface Candidate { ref: SpriteRef; index: number; score: number }
-export interface MatchResult { best: Candidate | null; alternatives: Candidate[]; confidence: number }
+export interface MatchResult {
+  best: Candidate | null; alternatives: Candidate[]; confidence: number;
+  /** More distinct answers, best first (for re-picking by number order) */ pool?: Candidate[];
+  /** The answer was re-picked to fit the Pokédex numbers of its neighbours */ byOrder?: boolean;
+}
 
 const SIZE = 16;
 const COARSE = 4; // coarse grid used to pre-filter references
@@ -74,6 +82,7 @@ export function borderColor(p: Pixels, r: Rect): [number, number, number] {
  */
 // Threshold tuned on real recordings: 13 keeps pale Pokémon (Seel, Goldeen, Galarian Corsola) from
 // fading into the near-white storage background without picking up compression noise.
+const GLOW_STEP = 5;
 export function spriteMask(p: Pixels, r: Rect, bg: [number, number, number], threshold = 13): Float32Array {
   const { w, h } = r;
   const m = new Float32Array(w * h);
@@ -82,20 +91,36 @@ export function spriteMask(p: Pixels, r: Rect, bg: [number, number, number], thr
     const d = cdist(p.data[i], p.data[i + 1], p.data[i + 2], bg[0], bg[1], bg[2]);
     m[y * w + x] = Math.max(0, Math.min(1, (d - threshold * 0.6) / threshold));
   }
+  // Recently caught Pokémon sit on a soft blue-green glow. It fades smoothly out of the background, so
+  // the background fill may also spread through glow-coloured pixels — but only in small steps, which
+  // stops it at the Pokémon's (sharp) edge.
+  const glow = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = px(p, r.x + x, r.y + y);
+    const dr = bg[0] - p.data[i], dg = bg[1] - p.data[i + 1], db = bg[2] - p.data[i + 2];
+    glow[y * w + x] = dr >= 4 && dr <= 110 && dg >= -5 && dg <= dr * 0.55 + 3 && db >= -6 && db <= dr * 0.5 + 3 ? 1 : 0;
+  }
+  const step = (a: number, b: number) => {
+    const i = px(p, r.x + (a % w), r.y + ((a / w) | 0)), j = px(p, r.x + (b % w), r.y + ((b / w) | 0));
+    return cdist(p.data[i], p.data[i + 1], p.data[i + 2], p.data[j], p.data[j + 1], p.data[j + 2]);
+  };
   // flood-fill background from the border; unreached low-contrast pixels are enclosed → foreground
   const seen = new Uint8Array(w * h);
   const stack: number[] = [];
-  for (let x = 0; x < w; x++) { stack.push(x, (h - 1) * w + x); }
-  for (let y = 0; y < h; y++) { stack.push(y * w, y * w + w - 1); }
+  const seed = (k: number) => { if (!seen[k] && (m[k] < 0.5 || glow[k])) { seen[k] = 1; stack.push(k); } };
+  for (let x = 0; x < w; x++) { seed(x); seed((h - 1) * w + x); }
+  for (let y = 0; y < h; y++) { seed(y * w); seed(y * w + w - 1); }
+  const visit = (k: number, n: number) => { if (!seen[n] && (m[n] < 0.5 || (glow[n] && step(k, n) < GLOW_STEP))) { seen[n] = 1; stack.push(n); } };
   while (stack.length) {
     const k = stack.pop()!;
-    if (seen[k] || m[k] >= 0.5) continue;
-    seen[k] = 1;
     const x = k % w, y = (k / w) | 0;
-    if (x > 0) stack.push(k - 1); if (x < w - 1) stack.push(k + 1);
-    if (y > 0) stack.push(k - w); if (y < h - 1) stack.push(k + w);
+    if (x > 0) visit(k, k - 1); if (x < w - 1) visit(k, k + 1);
+    if (y > 0) visit(k, k - w); if (y < h - 1) visit(k, k + w);
   }
-  for (let k = 0; k < w * h; k++) if (!seen[k] && m[k] < 0.5) m[k] = 1;
+  for (let k = 0; k < w * h; k++) {
+    if (seen[k]) { if (m[k] >= 0.5) m[k] = 0; } // glow reached from the background
+    else if (m[k] < 0.5) m[k] = 1; // enclosed by the Pokémon
+  }
   dropSmallParts(m, w, h);
   return m;
 }
@@ -149,12 +174,64 @@ function dropSmallParts(m: Float32Array, w: number, h: number) {
     return bh <= h * 0.3 && bw >= bh * 1.3;
   });
   const others = sizes.reduce((s, n, id) => (isText[id] ? s : s + n), 0);
+  // The favourite star sits beside the CP number, so it pokes into the box's top-right corner. A
+  // separate piece entirely in that corner is the star (or what's left of it), not the Pokémon.
+  const isStar = sizes.map((n, id) => { const [x0, , , y1] = boxes[id]; return n !== largest && x0 >= w * 0.68 && y1 <= h * 0.32; });
   for (let k = 0; k < w * h; k++) {
     const id = label[k];
     if (id < 0) continue;
-    if (isText[id] && others >= 20) { m[k] = 0; continue; }
+    if ((isText[id] && others >= 20) || isStar[id]) { m[k] = 0; continue; }
     if (edge[id] && sizes[id] < keepEdge && sizes[id] !== largest) m[k] = 0;
   }
+}
+
+/**
+ * Erase the game's fast-scroll handle (a white half-circle with up/down arrows on the right edge of the
+ * screen, moving with the scroll) so it isn't read as part of a Pokémon in the right-hand column.
+ * Found by its two teal arrows stacked near the right edge. Modifies the pixels; returns whether found.
+ */
+export function eraseScrollHandle(p: Pixels): boolean {
+  const W = p.width, s = W / 540;
+  const xa = Math.round(W * 0.915), xb = Math.round(W * 0.975);
+  const isArrow = (i: number) => { const r = p.data[i], g = p.data[i + 1], b = p.data[i + 2]; return r < 140 && g - r > 35 && b - r > 35 && g < 215; };
+  // rows with arrow-coloured pixels inside the strip → runs
+  const runs: [number, number][] = [];
+  let start = -1, gap = 0;
+  for (let y = 0; y < p.height; y++) {
+    let n = 0;
+    for (let x = xa; x < xb; x++) if (isArrow(px(p, x, y))) n++;
+    if (n >= 1 && n <= 14 * s) { if (start < 0) start = y; gap = 0; }
+    else if (start >= 0 && ++gap > 1) { runs.push([start, y - gap]); start = -1; gap = 0; }
+  }
+  let found = false;
+  for (let k = 0; k + 1 < runs.length; k++) {
+    const [a0, a1] = runs[k], [b0, b1] = runs[k + 1];
+    const h1 = a1 - a0 + 1, h2 = b1 - b0 + 1, between = b0 - a1;
+    if (h1 < 3 * s || h1 > 16 * s || h2 < 3 * s || h2 > 16 * s || between < 4 * s || between > 22 * s) continue;
+    // The handle is always the same size: a circle (radius ~37 px at 540 wide, plus a soft shadow)
+    // centred just right of the arrows.
+    let sx = 0, n = 0;
+    for (let y = a0; y <= b1; y++) for (let x = xa; x < xb; x++) if (isArrow(px(p, x, y))) { sx += x; n++; }
+    const cy = (a0 + b1) / 2, cx = sx / n + 8 * s, R = 37 * s, pad = 5 * s;
+    // fill with the median background colour just left of the handle (robust to CP digits / stars)
+    const rs: number[] = [], gs: number[] = [], bs: number[] = [];
+    for (let y = Math.max(0, Math.round(cy - R)); y <= Math.min(p.height - 1, Math.round(cy + R)); y += 2) {
+      for (let x = Math.max(0, Math.round(cx - R - 26 * s)); x < cx - R - 10 * s; x += 2) { const i = px(p, x, y); rs.push(p.data[i]); gs.push(p.data[i + 1]); bs.push(p.data[i + 2]); }
+    }
+    if (!rs.length) continue;
+    const med = (a: number[]) => a.sort((u, v) => u - v)[a.length >> 1];
+    const fill = [med(rs), med(gs), med(bs)];
+    for (let y = Math.max(0, Math.round(cy - R - pad)); y <= Math.min(p.height - 1, Math.round(cy + R + pad)); y++) {
+      for (let x = Math.max(0, Math.round(cx - R - pad)); x < W; x++) {
+        const dx = x - cx, dy = y - cy;
+        if (x < cx && dx * dx + dy * dy > (R + pad) * (R + pad)) continue;
+        const i = px(p, x, y); p.data[i] = fill[0]; p.data[i + 1] = fill[1]; p.data[i + 2] = fill[2];
+      }
+    }
+    found = true;
+    k++;
+  }
+  return found;
 }
 
 /** Fingerprint a sprite inside rect r of an image (same algorithm as build-sprites.mjs). */
@@ -192,7 +269,7 @@ export function fingerprintRegion(p: Pixels, r: Rect, bg?: [number, number, numb
     fp[c * 4 + 3] = Math.round(al * 255);
     cov += al;
   }
-  return { fp, aspect: bw / bh, coverage: cov / (SIZE * SIZE), bbox: [x0, y0, x1, y1] };
+  return { fp, aspect: bw / bh, coverage: cov / (SIZE * SIZE), bbox: [x0, y0, x1, y1], bg: background };
 }
 
 /**
@@ -217,12 +294,20 @@ export function cutoutPreview(p: Pixels, r: Rect, f: Fingerprint | null): { w: n
 }
 
 // ---------------------------------------------------------------- matching
-function fullDistance(a: Uint8Array, b: Uint8Array, bo: number): number {
+/**
+ * How much it counts against a match that the reference has a part the tile doesn't show: a part the
+ * same colour as the background (Electrode's white top on the near-white tile) can't be seen anyway.
+ */
+const visible = (r: number, g: number, b: number, bg?: [number, number, number]) =>
+  !bg ? 1 : Math.max(VIS_FLOOR, Math.min(1, (cdist(r, g, b, bg[0], bg[1], bg[2]) - 6) / 18));
+const VIS_FLOOR = 0.15;
+
+function fullDistance(a: Uint8Array, b: Uint8Array, bo: number, bg?: [number, number, number]): number {
   let shape = 0, color = 0, wsum = 0;
   for (let c = 0; c < SIZE * SIZE; c++) {
     const i = c * 4, j = bo + i;
     const aa = a[i + 3] / 255, ab = b[j + 3] / 255;
-    shape += (aa - ab) * (aa - ab);
+    shape += (aa - ab) * (aa - ab) * (ab > aa ? visible(b[j], b[j + 1], b[j + 2], bg) : 1);
     const wgt = Math.min(aa, ab);
     if (wgt > 0.15) {
       color += wgt * cdist(a[i], a[i + 1], a[i + 2], b[j], b[j + 1], b[j + 2]);
@@ -233,12 +318,13 @@ function fullDistance(a: Uint8Array, b: Uint8Array, bo: number): number {
   return colorTerm + (shape / (SIZE * SIZE)) * 220;
 }
 
-function coarseDistance(a: Float32Array, b: Float32Array, bo: number): number {
+function coarseDistance(a: Float32Array, b: Float32Array, bo: number, bg?: [number, number, number]): number {
   let d = 0;
   for (let c = 0; c < COARSE * COARSE; c++) {
     const i = c * 4, j = bo + i;
     const wgt = Math.min(a[i + 3], b[j + 3]);
-    d += (a[i + 3] - b[j + 3]) * (a[i + 3] - b[j + 3]) * 300 + wgt * cdist(a[i], a[i + 1], a[i + 2], b[j], b[j + 1], b[j + 2]);
+    const vis = b[j + 3] > a[i + 3] ? visible(b[j], b[j + 1], b[j + 2], bg) : 1;
+    d += (a[i + 3] - b[j + 3]) * (a[i + 3] - b[j + 3]) * 300 * vis + wgt * cdist(a[i], a[i + 1], a[i + 2], b[j], b[j + 1], b[j + 2]);
   }
   return d;
 }
@@ -260,29 +346,75 @@ export function matchFingerprint(lib: SpriteLibrary, f: Fingerprint, opts: Match
     const ref = lib.refs[r];
     if (opts.filter && !opts.filter(ref)) continue;
     const asp = Math.log(f.aspect / ref.aspect);
-    pre.push({ i: r, d: coarseDistance(coarse, lib.coarse, r * COARSE * COARSE * 4) + asp * asp * 400 });
+    pre.push({ i: r, d: coarseDistance(coarse, lib.coarse, r * COARSE * COARSE * 4, f.bg) + asp * asp * 400 });
   }
   pre.sort((a, b) => a.d - b.d);
-  const shortlist = pre.slice(0, opts.shortlist ?? 80);
+  // The coarse pre-filter is rough (thin shapes like Unown O can rank low), so keep a generous shortlist
+  const shortlist = pre.slice(0, opts.shortlist ?? 300);
   const scored: Candidate[] = shortlist.map(({ i }) => {
     const ref = lib.refs[i];
     const asp = Math.log(f.aspect / ref.aspect);
-    return { ref, index: i, score: fullDistance(f.fp, lib.fp, i * SIZE * SIZE * 4) + asp * asp * 60 + (opts.prior ? opts.prior(ref) : 0) };
+    return { ref, index: i, score: fullDistance(f.fp, lib.fp, i * SIZE * SIZE * 4, f.bg) + asp * asp * 60 + (opts.prior ? opts.prior(ref) : 0) };
   }).sort((a, b) => a.score - b.score);
   // keep one candidate per distinct answer (id + costume + shiny)
   const seen = new Set<string>();
-  const alternatives: Candidate[] = [];
+  const pool: Candidate[] = [];
   for (const c of scored) {
     const k = answerKey(c.ref);
     if (seen.has(k)) continue;
     seen.add(k);
-    alternatives.push(c);
-    if (alternatives.length >= 6) break;
+    pool.push(c);
+    if (pool.length >= 30) break;
   }
+  const alternatives = pool.slice(0, 6);
   const best = alternatives[0] || null;
   const second = alternatives[1];
   const confidence = !best ? 0 : !second ? 1 : Math.max(0, Math.min(1, (second.score - best.score) / Math.max(4, best.score * 0.6)));
-  return { best, alternatives, confidence };
+  return { best, alternatives, confidence, pool };
+}
+
+/**
+ * Storage sorted by number: every Pokémon's number lies between its neighbours'. When the confident
+ * reads show the list is in number order (either direction), any read that doesn't fit between the
+ * nearest confident reads on each side is flagged, and re-picked from its candidates if one that fits
+ * is a reasonably close match. Mutates the results; returns how many answers changed.
+ */
+export function applyNumberOrder(matches: MatchResult[], dexOf: (id: string) => number, flagBelow: number, sure = 0.5): number {
+  const dex = matches.map((m) => (m.best ? dexOf(m.best.ref.id) : 0));
+  const confident = matches.map((m, i) => !!m.best && m.confidence >= sure && dex[i] > 0);
+  // is the list in number order? compare consecutive confident reads
+  let up = 0, down = 0, last = -1;
+  for (let i = 0; i < matches.length; i++) {
+    if (!confident[i]) continue;
+    if (last >= 0) { if (dex[i] >= dex[last]) up++; if (dex[i] <= dex[last]) down++; }
+    last = i;
+  }
+  const pairs = matches.filter((_, i) => confident[i]).length - 1;
+  if (pairs < 8) return 0;
+  const dir = up >= pairs * 0.9 ? 1 : down >= pairs * 0.9 ? -1 : 0;
+  if (!dir) return 0;
+  const prevSure = new Int32Array(matches.length).fill(-1), nextSure = new Int32Array(matches.length).fill(-1);
+  for (let i = 0, l = -1; i < matches.length; i++) { prevSure[i] = l; if (confident[i]) l = i; }
+  for (let i = matches.length - 1, l = -1; i >= 0; i--) { nextSure[i] = l; if (confident[i]) l = i; }
+  let changed = 0;
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i];
+    if (!m.best || prevSure[i] < 0 || nextSure[i] < 0) continue;
+    const a = dex[prevSure[i]], b = dex[nextSure[i]];
+    const lo = Math.min(a, b), hi = Math.max(a, b);
+    if ((b - a) * dir < 0) continue; // the neighbours themselves disagree
+    if (dex[i] >= lo && dex[i] <= hi) continue;
+    // doesn't fit: never leave it unflagged, and try a candidate that does fit
+    m.confidence = Math.min(m.confidence, flagBelow * 0.99);
+    const fit = (m.pool || m.alternatives).find((c) => { const d = dexOf(c.ref.id); return d >= lo && d <= hi; });
+    if (fit && fit.score <= m.best.score * 1.4 + 4) {
+      m.best = fit;
+      m.alternatives = [fit, ...m.alternatives.filter((c) => c !== fit)].slice(0, 6);
+      m.byOrder = true;
+      changed++;
+    }
+  }
+  return changed;
 }
 
 export const answerKey = (r: SpriteRef) => `${r.id}|${r.costume || ''}|${r.shiny ? 1 : 0}`;

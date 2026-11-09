@@ -34,6 +34,9 @@ const SRC = {
   pvpokeRank: (cup, cat, cp) => `https://raw.githubusercontent.com/pvpoke/pvpoke/master/src/data/rankings/${cup}/${cat}/rankings-${cp}.json`,
   assetsDir: 'https://api.github.com/repos/PokeMiners/pogo_assets/contents/Images/Pokemon',
   scrapedDuck: (f) => `https://raw.githubusercontent.com/bigfoott/ScrapedDuck/data/${f}.json`,
+  // Species released in the game, by dex number. PvPoke marks Pokémon it can't use in battles (Ditto,
+  // Shedinja, Spewpa, Cosmog…) as unreleased, so this list fills those in.
+  released: 'https://pogoapi.net/api/v1/released_pokemon.json',
 };
 
 async function fetchCached(name, url, { json = true, optional = false } = {}) {
@@ -83,6 +86,7 @@ async function main() {
   const i18nRaw = await fetchCached('i18n_en.json', SRC.i18n);
   const remoteText = await fetchCached('remote_en.txt', SRC.remoteText, { json: false, optional: true });
   const pvp = await fetchCached('pvpoke_gm.json', SRC.pvpoke);
+  const releasedDex = new Set(Object.keys((await fetchCached('released.json', SRC.released, { optional: true })) || {}).map(Number));
 
   // ------------------------------------------------------------ text
   const T = new Map();
@@ -361,7 +365,7 @@ async function main() {
         dmax: dynamaxVisual || undefined,
         img, shinyImg: assetFiles.size ? assetFiles.has(`${img}.s.icon.png`) : true,
         variants: (() => { const n = g.filter((x) => !/(COPY|NOEVOLVE|_S$)/.test(x.s.form || '')).length; return n > 1 ? n : undefined; })(),
-        released: match ? match.released !== false : false,
+        released: (match ? match.released !== false : false) || (!formSuffix && releasedDex.has(dex)),
         shadowReleased: !!match?.tags?.includes('shadoweligible'),
         pvpoke: match?.speciesId || null,
         tags: match?.tags?.filter((x) => !['shadoweligible', 'teambuilderexclude'].includes(x)) || [],
