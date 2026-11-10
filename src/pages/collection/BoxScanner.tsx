@@ -79,9 +79,10 @@ export default function BoxScanner() {
         Object.assign(tr.source, { duration: el.duration, videoWidth: el.videoWidth, videoHeight: el.videoHeight });
         tr.timings.openVideo = performance.now() - t0;
         const v = videoSource(el);
+        tr.frameStats = v.stats;
         videoRef.current = v;
         setProgress({ label: 'Finding your pauses…', value: 0 });
-        const times = await findStillTimes(v, (f) => setProgress({ label: 'Finding your pauses…', value: f }), 0.25, abort.current.signal);
+        const times = await findStillTimes(v, (f) => setProgress({ label: 'Finding your pauses…', value: f }), 0.25, abort.current.signal, (tr.stillDiffs = []));
         tr.pauses = times;
         tr.timings.findPauses = performance.now() - t0 - tr.timings.openVideo;
         if (!times.length) throw new Error('No pauses found. Pause for about a second after each scroll so the scanner can read a still frame.');

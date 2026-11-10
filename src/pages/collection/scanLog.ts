@@ -1,7 +1,7 @@
 // A troubleshooting record of one scan: the device, the settings, every page and tile the scanner read,
 // and small pictures of the doubtful tiles. Built on request and saved as a file on this device.
 import { answerKey, CALIBRATION_VERSION, type GridCalibration } from '../../lib/scanner';
-import type { StillRun } from './scanFrames';
+import type { FrameSource, StillRun } from './scanFrames';
 import type { ScanOutput } from './scanRunner';
 
 /** What the page collects while a scan is set up and run. */
@@ -12,6 +12,10 @@ export interface ScanTrace {
   /** size of the frames the scanner works on */
   analysis?: [number, number];
   pauses?: StillRun[];
+  /** change between samples a quarter second apart, from the pause search (under 3.5 counts as still; -1 = first sample) */
+  stillDiffs?: number[];
+  /** frames fetched from the video, by kind, and how long that took */
+  frameStats?: FrameSource['stats'];
   /** the first page as the scanner saw it (JPEG) */
   firstPage?: string;
   /** the two taps on CP numbers, the grid they gave, and what the automatic fit changed */
@@ -67,7 +71,7 @@ export async function buildScanLog(trace: ScanTrace, items: LogItem[] | null, fl
   const out = trace.output;
   const columns = trace.calibration?.columns ?? 3;
   const byUid = new Map((items || []).map((i) => [i.uid, i]));
-  let pictures = 0, flaggedN = 0, corrected = 0, removed = 0;
+  let pictures = 0, flaggedN = 0, corrected = 0, removed = 0, reread = 0;
   const tiles: Record<string, unknown>[] = [];
   for (const [uid, t] of (out?.tiles || []).entries()) {
     const m = t.match, item = byUid.get(uid);
@@ -77,11 +81,12 @@ export async function buildScanLog(trace: ScanTrace, items: LogItem[] | null, fl
     const now = item?.answer ? answerKey({ ...item.answer, aspect: 0 }) : null;
     const changed = !!item?.edited && now !== read;
     if (flagged) flaggedN++;
+    if (t.reread) reread++;
     if (gone) removed++;
     if (changed) corrected++;
     const row: Record<string, unknown> = {
       n: uid, page: t.page, at: t.label, row: Math.floor(t.slot / columns), col: t.slot % columns, box: [t.rect.x, t.rect.y, t.rect.w, t.rect.h],
-      read, confidence: m.confidence, flagged: flagged || undefined, byOrder: m.byOrder || undefined,
+      read, confidence: m.confidence, flagged: flagged || undefined, byOrder: m.byOrder || undefined, underHandle: t.underHandle, reread: t.reread,
       // answer keys are id|costume|shiny
       candidates: m.alternatives.map((c) => [answerKey(c.ref) + (c.ref.variant ? `~${c.ref.variant}` : '') + (c.ref.female ? '~f' : ''), c.score]),
       shape: t.fp.aspect, fill: t.fp.coverage, outline: t.fp.bbox, background: t.fp.bg,
@@ -97,7 +102,7 @@ export async function buildScanLog(trace: ScanTrace, items: LogItem[] | null, fl
   }
   const nav = navigator as Navigator & { deviceMemory?: number };
   return format({
-    kind: 'pogo-companion box scan log', logVersion: 1, saved: new Date().toISOString(), started: trace.started,
+    kind: 'pogo-companion box scan log', logVersion: 2, saved: new Date().toISOString(), started: trace.started,
     app: {
       build: typeof __BUILD__ !== 'undefined' ? __BUILD__ : null, calibrationVersion: CALIBRATION_VERSION, page: location.origin + location.pathname,
       installed: typeof matchMedia === 'function' && matchMedia('(display-mode: standalone)').matches,
@@ -109,16 +114,20 @@ export async function buildScanLog(trace: ScanTrace, items: LogItem[] | null, fl
     summary: out ? {
       found: out.tiles.length, confident: out.tiles.length - flaggedN, flagged: flaggedN, faded: out.faded, pagesRead: out.pagesRead,
       pauses: trace.pauses?.length, corrected, removed, reviewed: !!items, picturesKept: pictures,
+      // pages that weren't where a pause said they'd be (the list was followed frame by frame instead), and tiles read again clear of the scroll handle
+      pagesFollowed: out.log.pages.filter((p) => p.followed).length, reread,
     } : { scanFinished: false },
     search: trace.search,
     source: trace.source,
     analysis: trace.analysis,
     timings: trace.timings,
+    frameStats: trace.frameStats,
     events: trace.events,
     warnings: out?.warnings,
     calibration: trace.calibration,
     taps: trace.taps,
     pauses: trace.pauses,
+    stillDiffs: trace.stillDiffs,
     pages: out?.log.pages,
     scrolls: out?.log.scrolls,
     tiles,

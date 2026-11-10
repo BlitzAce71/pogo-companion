@@ -336,9 +336,10 @@ function dropSmallParts(m: Float32Array, w: number, h: number) {
 /**
  * Erase the game's fast-scroll handle (a white half-circle with up/down arrows on the right edge of the
  * screen, moving with the scroll) so it isn't read as part of a Pokémon in the right-hand column.
- * Found by its two teal arrows stacked near the right edge. Modifies the pixels; returns whether found.
+ * Found by its two teal arrows stacked near the right edge. Modifies the pixels; returns the area it
+ * erased (whatever was under the handle is lost), or null if the handle isn't on screen.
  */
-export function eraseScrollHandle(p: Pixels): boolean {
+export function eraseScrollHandle(p: Pixels): Rect | null {
   const W = p.width, s = W / 540;
   const xa = Math.round(W * 0.915), xb = Math.round(W * 0.975);
   // teal arrows; the handle fades in and out, so allow arrows part-blended into the white handle
@@ -352,7 +353,7 @@ export function eraseScrollHandle(p: Pixels): boolean {
     if (n >= 1 && n <= 14 * s) { if (start < 0) start = y; gap = 0; }
     else if (start >= 0 && ++gap > 1) { runs.push([start, y - gap]); start = -1; gap = 0; }
   }
-  let found = false;
+  let found: Rect | null = null;
   for (let k = 0; k + 1 < runs.length; k++) {
     const [a0, a1] = runs[k], [b0, b1] = runs[k + 1];
     const h1 = a1 - a0 + 1, h2 = b1 - b0 + 1, between = b0 - a1;
@@ -362,14 +363,22 @@ export function eraseScrollHandle(p: Pixels): boolean {
     let sx = 0, n = 0;
     for (let y = a0; y <= b1; y++) for (let x = xa; x < xb; x++) if (isArrow(px(p, x, y))) { sx += x; n++; }
     const cy = (a0 + b1) / 2, cx = sx / n + 8 * s, R = 37 * s, pad = 5 * s;
-    // fill with the median background colour just left of the handle (robust to CP digits / stars)
-    const rs: number[] = [], gs: number[] = [], bs: number[] = [];
-    for (let y = Math.max(0, Math.round(cy - R)); y <= Math.min(p.height - 1, Math.round(cy + R)); y += 2) {
-      for (let x = Math.max(0, Math.round(cx - R - 26 * s)); x < cx - R - 10 * s; x += 2) { const i = px(p, x, y); rs.push(p.data[i]); gs.push(p.data[i + 1]); bs.push(p.data[i + 2]); }
-    }
-    if (!rs.length) continue;
-    const med = (a: number[]) => a.sort((u, v) => u - v)[a.length >> 1];
-    const fill = [med(rs), med(gs), med(bs)];
+    // Fill with the tile background: the median of the pale pixels just left of, above and below the
+    // handle. (A Pokémon often stands right beside the handle, so a plain median can be its colour.)
+    const near: number[][] = [];
+    const take = (xA: number, xB: number, yA: number, yB: number) => {
+      for (let y = Math.max(0, Math.round(yA)); y <= Math.min(p.height - 1, Math.round(yB)); y += 2) {
+        for (let x = Math.max(0, Math.round(xA)); x < Math.min(W, xB); x += 2) { const i = px(p, x, y); near.push([p.data[i], p.data[i + 1], p.data[i + 2]]); }
+      }
+    };
+    take(cx - R - 26 * s, cx - R - 10 * s, cy - R, cy + R);
+    take(cx - R, W, cy - R - pad - 16 * s, cy - R - pad - 4 * s);
+    take(cx - R, W, cy + R + pad + 4 * s, cy + R + pad + 16 * s);
+    if (!near.length) continue;
+    const pale = near.filter((c) => Math.min(c[0], c[1], c[2]) >= 200);
+    const from = pale.length >= 12 ? pale : near;
+    const med = (ch: number) => from.map((c) => c[ch]).sort((u, v) => u - v)[from.length >> 1];
+    const fill = [med(0), med(1), med(2)];
     for (let y = Math.max(0, Math.round(cy - R - pad)); y <= Math.min(p.height - 1, Math.round(cy + R + pad)); y++) {
       for (let x = Math.max(0, Math.round(cx - R - pad)); x < W; x++) {
         const dx = x - cx, dy = y - cy;
@@ -377,7 +386,8 @@ export function eraseScrollHandle(p: Pixels): boolean {
         const i = px(p, x, y); p.data[i] = fill[0]; p.data[i + 1] = fill[1]; p.data[i + 2] = fill[2];
       }
     }
-    found = true;
+    const hx = Math.max(0, Math.round(cx - R - pad)), hy = Math.max(0, Math.round(cy - R - pad));
+    found = { x: hx, y: hy, w: W - hx, h: Math.min(p.height - 1, Math.round(cy + R + pad)) - hy + 1 };
     k++;
   }
   return found;

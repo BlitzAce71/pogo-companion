@@ -18,6 +18,8 @@ export interface FrameSource {
   profile(t: number): Promise<Float32Array>;
   /** The full frame at the analysis width */
   page(t: number, index: number): Promise<Page>;
+  /** How many frames of each kind were fetched and how long that took (ms) — for the troubleshooting log */
+  stats?: Record<'tiny' | 'profile' | 'page', { n: number; ms: number; maxMs: number }>;
 }
 
 function seek(video: HTMLVideoElement, t: number): Promise<void> {
@@ -66,7 +68,7 @@ export interface StillRun { start: number; end: number; time: number }
  * Find the moments the recording is still (your pauses between scrolls).
  * Samples the video every `step` seconds at low resolution and keeps the middle of each still run.
  */
-export async function findStillTimes(source: FrameSource, onProgress: (f: number) => void, step = 0.25, signal?: AbortSignal): Promise<StillRun[]> {
+export async function findStillTimes(source: FrameSource, onProgress: (f: number) => void, step = 0.25, signal?: AbortSignal, diffsOut?: number[]): Promise<StillRun[]> {
   let prev: Uint8ClampedArray | null = null;
   const diffs: { t: number; d: number }[] = [];
   for (let t = 0; t <= source.duration; t += step) {
@@ -80,6 +82,7 @@ export async function findStillTimes(source: FrameSource, onProgress: (f: number
   }
   // still = frame barely changed since the previous sample (a quarter-second stop is enough: screen
   // recordings have no motion blur, so any frame where the list isn't moving reads cleanly)
+  if (diffsOut) for (const x of diffs) diffsOut.push(Number.isFinite(x.d) ? Math.round(x.d * 10) / 10 : -1);
   const still = diffs.map((x) => x.d < 3.5);
   const runs: StillRun[] = [];
   for (let i = 0; i < still.length; ) {
@@ -96,11 +99,12 @@ export async function findStillTimes(source: FrameSource, onProgress: (f: number
 export interface TrackedFrame { t: number; cum: number; step: number }
 
 /**
- * How far the storage list scrolled between two pauses, by following the motion frame by frame
+ * How far the storage list scrolled between two moments, by following the motion frame by frame
  * (~30 fps). Returns the total (pixels at the analysis width, content moved up = positive) and every
- * frame's time, cumulative scroll and its own motion (small = a crisp frame worth reading).
+ * frame's time, cumulative scroll and its own motion (small = a crisp frame worth reading), plus each
+ * frame's brightness profile.
  */
-export async function measureScroll(source: FrameSource, from: StillRun, to: StillRun, cal: GridCalibration, signal?: AbortSignal): Promise<{ total: number; frames: TrackedFrame[] }> {
+export async function followScroll(source: FrameSource, t0: number, t1: number, cal: GridCalibration, signal?: AbortSignal): Promise<{ total: number; frames: TrackedFrame[]; profiles: Float32Array[] }> {
   const profiles: Float32Array[] = [];
   const times: number[] = [];
   const grab = async (t: number) => {
@@ -109,15 +113,17 @@ export async function measureScroll(source: FrameSource, from: StillRun, to: Sti
     profiles.push(await source.profile(t));
   };
   const step = 1 / 30;
-  await grab(from.end);
-  for (let t = from.end + step; t < to.start; t += step) await grab(t);
-  await grab(to.start);
+  await grab(t0);
+  for (let t = t0 + step; t < t1; t += step) await grab(t);
+  await grab(t1);
   const steps = trackSteps(profiles, cal);
   const frames: TrackedFrame[] = [{ t: times[0], cum: 0, step: 0 }];
   let cum = 0;
   steps.forEach((st, i) => { cum += st; frames.push({ t: times[i + 1], cum, step: Math.max(Math.abs(st), Math.abs(steps[i + 1] ?? st)) }); });
-  return { total: cum, frames };
+  return { total: cum, frames, profiles };
 }
+/** The scroll between two pauses: from the end of one to the start of the next. */
+export const measureScroll = (source: FrameSource, from: StillRun, to: StillRun, cal: GridCalibration, signal?: AbortSignal) => followScroll(source, from.end, to.start, cal, signal);
 
 /** Frames from a <video> element (seeking, then drawing to a canvas). */
 export function videoSource(video: HTMLVideoElement): FrameSource {
@@ -127,7 +133,7 @@ export function videoSource(video: HTMLVideoElement): FrameSource {
   const big = document.createElement('canvas');
   big.width = ANALYSIS_WIDTH; big.height = Math.round((video.videoHeight / video.videoWidth) * ANALYSIS_WIDTH);
   const bigCtx = big.getContext('2d', { willReadFrequently: true })!;
-  return {
+  const raw: FrameSource = {
     duration: video.duration,
     async tiny(t) { await seek(video, t); tinyCtx.drawImage(video, 0, 0, tinyC.width, tinyC.height); return tinyCtx.getImageData(0, 0, tinyC.width, tinyC.height).data; },
     async profile(t) {
@@ -138,6 +144,12 @@ export function videoSource(video: HTMLVideoElement): FrameSource {
     },
     page: (t, index) => grabFrame(video, t, index),
   };
+  const stats = { tiny: { n: 0, ms: 0, maxMs: 0 }, profile: { n: 0, ms: 0, maxMs: 0 }, page: { n: 0, ms: 0, maxMs: 0 } };
+  const timed = <A extends unknown[], R>(kind: keyof typeof stats, fn: (...a: A) => Promise<R>) => async (...a: A): Promise<R> => {
+    const t0 = performance.now();
+    try { return await fn(...a); } finally { const ms = performance.now() - t0, s = stats[kind]; s.n++; s.ms += ms; s.maxMs = Math.max(s.maxMs, ms); }
+  };
+  return { duration: raw.duration, tiny: timed('tiny', raw.tiny), profile: timed('profile', raw.profile), page: timed('page', raw.page), stats };
 }
 
 export async function grabFrame(video: HTMLVideoElement, t: number, index: number): Promise<Page> {
