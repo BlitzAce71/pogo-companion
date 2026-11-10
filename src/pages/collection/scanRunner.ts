@@ -6,8 +6,25 @@ import {
 } from '../../lib/scanner';
 import { loadImagePage, measureScroll, thumbnail, type FrameSource, type Page, type StillRun } from './scanFrames';
 
-export interface RawTile { page: number; label: string; fp: Fingerprint; match: MatchResult; thumb: string; cutout: string; rect: Rect }
-export interface ScanOutput { tiles: RawTile[]; warnings: string[]; pagesRead: number; /** faded (fused) Pokémon left out */ faded: number }
+export interface RawTile { page: number; /** place on its page: row × columns + column */ slot: number; label: string; fp: Fingerprint; match: MatchResult; thumb: string; cutout: string; rect: Rect }
+export interface ScanOutput { tiles: RawTile[]; warnings: string[]; pagesRead: number; /** faded (fused) Pokémon left out */ faded: number; log: ScanTrail }
+
+/** One page (frame or screenshot) as the scanner read it — for the troubleshooting log. */
+export interface PageLog {
+  label: string; time: number | null; seeked?: number;
+  /** how far the list had scrolled, in analysis pixels (video only) */ pos: number | null;
+  width: number; height: number;
+  /** where the row pattern was found, and the top of each row's picture box */ phase: number; rows: number[];
+  /** tile slots looked at; of those: empty, already read on an earlier page, faded, and newly added */
+  slots: number; empty: number; repeated: number; faded: number; added: number;
+  /** rows that went by unread before this page */ gapRows: number;
+  /** the scroll handle was on screen and erased */ handle: boolean;
+  /** time to fetch the frame, and to read it */ grabMs: number; readMs: number;
+}
+/** One followed scroll between two pauses. */
+export interface ScrollLog { from: number; to: number; total: number; frames: number; /** biggest move between two frames */ fastest: number; /** times of in-between frames that were read */ reads: number[]; /** scroll so far at each frame */ cum: number[] }
+export interface ScanTrail { pages: PageLog[]; scrolls: ScrollLog[] }
+const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 export interface ScanOptions {
   lib: SpriteLibrary;
@@ -47,15 +64,17 @@ function makeProcessor(o: ScanOptions, out: ScanOutput, gaps: string[], noOverla
   let readUpTo = -Infinity;
   return {
     get prev() { return prev; },
-    process(page: Page, pos: number | null) {
+    process(page: Page, pos: number | null, grabMs = 0) {
+      const t0 = now();
       const p = page.pixels;
-      eraseScrollHandle(p);
+      const handle = eraseScrollHandle(p);
       const gapBg = borderColor(p, { x: Math.round(cal.x0 + cal.pitchX / 2 - 2), y: cal.top, w: 4, h: Math.max(4, cal.bottom - cal.top) });
-      const rects = tileRects(p, cal, findRowPhase(p, cal, gapBg));
+      const phase = findRowPhase(p, cal, gapBg);
+      const rects = tileRects(p, cal, phase);
       const fps = rects.map((r) => fingerprintRegion(p, r));
       const sigs = rects.map((r, k) => (fps[k] ? tileSignature(p, r, cal) : null));
       const rowYs = rects.filter((_, k) => k % cal.columns === 0).map((r) => r.y);
-      let skip = 0;
+      let skip = 0, gapRows = 0, added = 0, faded = 0;
       if (pos !== null && rowYs.length) {
         // Video: we followed the scroll, so a row's position in the whole list is y + pos. Rows at or above
         // the furthest row already read are repeats (including ones revisited by scrolling back up).
@@ -63,7 +82,7 @@ function makeProcessor(o: ScanOptions, out: ScanOutput, gaps: string[], noOverla
         const repeats = abs.filter((a) => a <= readUpTo + cal.pitchY / 2).length;
         skip = repeats * cal.columns;
         if (readUpTo > -Infinity && repeats < abs.length) {
-          const gapRows = Math.round((abs[repeats] - readUpTo) / cal.pitchY) - 1;
+          gapRows = Math.max(0, Math.round((abs[repeats] - readUpTo) / cal.pitchY) - 1);
           if (gapRows > 0) gaps.push(`${page.label} (${gapRows} row${gapRows > 1 ? 's' : ''})`);
         }
         readUpTo = Math.max(readUpTo, abs[abs.length - 1]);
@@ -76,11 +95,17 @@ function makeProcessor(o: ScanOptions, out: ScanOutput, gaps: string[], noOverla
       rects.forEach((r, k) => {
         const f = fps[k];
         if (k < skip || !f) return; // already read, or an empty slot at the end of the box
-        if (isFadedTile(p, r, cal)) { out.faded++; return; } // fused into another Pokémon: not usable
+        if (isFadedTile(p, r, cal)) { out.faded++; faded++; return; } // fused into another Pokémon: not usable
         const im = images(page.canvas, p, r, f);
-        out.tiles.push({ page: out.pagesRead, label: page.label, fp: f, match: matchFingerprint(o.lib, f, o.match), rect: r, ...im });
+        added++;
+        out.tiles.push({ page: out.pagesRead, slot: k, label: page.label, fp: f, match: matchFingerprint(o.lib, f, o.match), rect: r, ...im });
       });
       prev = { rowYs, sigs, pos };
+      out.log.pages.push({
+        label: page.label, time: page.time, seeked: page.seeked, pos, width: p.width, height: p.height, phase, rows: rowYs,
+        slots: rects.length, empty: fps.filter((f) => !f).length, repeated: Math.min(skip, rects.length), faded, added, gapRows, handle,
+        grabMs: Math.round(grabMs), readMs: Math.round(now() - t0),
+      });
       out.pagesRead++;
     },
   };
@@ -101,7 +126,7 @@ function finish(out: ScanOutput, o: ScanOptions) {
  */
 export async function scanVideo(video: FrameSource, pauses: StillRun[], o: ScanOptions): Promise<ScanOutput> {
   const { cal } = o;
-  const out: ScanOutput = { tiles: [], warnings: [], pagesRead: 0, faded: 0 };
+  const out: ScanOutput = { tiles: [], warnings: [], pagesRead: 0, faded: 0, log: { pages: [], scrolls: [] } };
   const gaps: string[] = [], noOverlap: string[] = [];
   const proc = makeProcessor(o, out, gaps, noOverlap);
   // The start and end of the recording count as pauses, so continuous scrolling still gets covered
@@ -113,9 +138,10 @@ export async function scanVideo(video: FrameSource, pauses: StillRun[], o: ScanO
   const read = async (t: number, pos: number) => {
     if (o.signal?.aborted) throw new Error('Cancelled');
     o.onProgress?.(`Reading ${label(t)} of ${label(video.duration)} · ${out.tiles.length} Pokémon so far`, t / video.duration);
+    const t0 = now();
     const page = await video.page(t, out.pagesRead);
     page.label = label(t);
-    proc.process(page, pos);
+    proc.process(page, pos, now() - t0);
   };
 
   let pausePos = 0;
@@ -123,6 +149,8 @@ export async function scanVideo(video: FrameSource, pauses: StillRun[], o: ScanO
   for (let i = 1; i < runs.length; i++) {
     o.onProgress?.(`Following the scroll at ${label(runs[i - 1].end)} · ${out.tiles.length} Pokémon so far`, runs[i - 1].end / video.duration);
     const track = await measureScroll(video, runs[i - 1], runs[i], cal, o.signal);
+    const scroll: ScrollLog = { from: runs[i - 1].end, to: runs[i].start, total: track.total, frames: track.frames.length, fastest: track.frames.reduce((m, f) => Math.max(m, f.step), 0), reads: [], cum: track.frames.map((f) => Math.round(f.cum)) };
+    out.log.scrolls.push(scroll);
     const endPos = pausePos + track.total;
     // Fill the gap with in-between frames, keeping one row of overlap with the last page read
     const visibleRows = Math.max(1, proc.prev?.rowYs.length ?? 1);
@@ -135,6 +163,7 @@ export async function scanVideo(video: FrameSource, pauses: StillRun[], o: ScanO
       // among frames within ~0.7 rows of the target, take the one moving least (crispest)
       const near = ahead.filter((f) => pausePos + f.cum >= target - cal.pitchY * 0.7);
       const pick = (near.length ? near : ahead).reduce((a, b) => (b.step < a.step || (b.step === a.step && b.cum > a.cum) ? b : a));
+      scroll.reads.push(pick.t);
       await read(pick.t, pausePos + pick.cum);
       lastPos = pausePos + pick.cum;
     }
@@ -148,7 +177,7 @@ export async function scanVideo(video: FrameSource, pauses: StillRun[], o: ScanO
 
 /** Scan screenshots (in order). Repeated rows are recognised by comparing tiles, since there's no motion to follow. */
 export async function scanImages(files: File[], o: ScanOptions): Promise<ScanOutput> {
-  const out: ScanOutput = { tiles: [], warnings: [], pagesRead: 0, faded: 0 };
+  const out: ScanOutput = { tiles: [], warnings: [], pagesRead: 0, faded: 0, log: { pages: [], scrolls: [] } };
   const gaps: string[] = [], noOverlap: string[] = [];
   const proc = makeProcessor(o, out, gaps, noOverlap);
   for (let i = 0; i < files.length; i++) {

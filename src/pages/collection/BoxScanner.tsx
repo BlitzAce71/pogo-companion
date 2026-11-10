@@ -10,6 +10,8 @@ import {
 import { useCollection, useMyPokemon, useStored, type Collection, type SavedMon } from '../../lib/storage';
 import type { GameData } from '../../lib/types';
 import { findStillTimes, loadImagePage, loadVideo, videoSource, type FrameSource, type Page, type StillRun } from './scanFrames';
+import { download } from './monStats';
+import { buildScanLog, canShareLog, logFileName, newTrace, note, shareLog, type ScanTrace } from './scanLog';
 import { scanImages, scanVideo } from './scanRunner';
 import './scanner.css';
 
@@ -50,6 +52,8 @@ export default function BoxScanner() {
   const abort = useRef<AbortController | null>(null);
   const videoRef = useRef<FrameSource | null>(null);
   const stillTimes = useRef<StillRun[]>([]);
+  // Everything about the current scan that the troubleshooting log needs
+  const trace = useRef<ScanTrace>(newTrace());
 
   useEffect(() => { loadLibrary().then(setLib, (e) => setLibError(String(e.message || e))); }, []);
   useEffect(() => { document.title = 'Box Scanner · PoGo Companion'; }, []);
@@ -63,24 +67,34 @@ export default function BoxScanner() {
     if (!files.length) return;
     abort.current = new AbortController();
     setWarnings([]);
+    const tr = (trace.current = newTrace(search));
+    const t0 = performance.now();
+    tr.source = { kind: isVideo ? 'video' : 'screenshots', files: files.map((f) => ({ name: f.name, type: f.type, mb: f.size / 1e6 })) };
+    const first = (pg: Page) => { tr.analysis = [pg.pixels.width, pg.pixels.height]; tr.firstPage = pg.canvas?.toDataURL('image/jpeg', 0.6); setPreview(pg); };
     try {
       setStage('scanning');
       if (isVideo) {
         setProgress({ label: 'Opening video…', value: 0 });
-        const v = videoSource(await loadVideo(files[0]));
+        const el = await loadVideo(files[0]);
+        Object.assign(tr.source, { duration: el.duration, videoWidth: el.videoWidth, videoHeight: el.videoHeight });
+        tr.timings.openVideo = performance.now() - t0;
+        const v = videoSource(el);
         videoRef.current = v;
         setProgress({ label: 'Finding your pauses…', value: 0 });
         const times = await findStillTimes(v, (f) => setProgress({ label: 'Finding your pauses…', value: f }), 0.25, abort.current.signal);
+        tr.pauses = times;
+        tr.timings.findPauses = performance.now() - t0 - tr.timings.openVideo;
         if (!times.length) throw new Error('No pauses found. Pause for about a second after each scroll so the scanner can read a still frame.');
         stillTimes.current = times;
-        setPreview(await v.page(times[0].time, 0));
+        first(await v.page(times[0].time, 0));
       } else {
         const imgs = files.filter((f) => f.type.startsWith('image/')).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
         if (!imgs.length) throw new Error('Choose a screen recording or screenshots.');
-        setPreview(await loadImagePage(imgs[0], 0));
+        first(await loadImagePage(imgs[0], 0));
       }
       setStage('calibrate');
     } catch (e) {
+      note(tr, `Stopped before the scan: ${String((e as Error).message || e)}`);
       toast.show(String((e as Error).message || e));
       setStage('setup');
     }
@@ -91,6 +105,9 @@ export default function BoxScanner() {
     if (!lib || !validCalibration(cal) || !preview) return;
     abort.current = new AbortController();
     setStage('scanning');
+    const tr = trace.current;
+    tr.search = search; tr.calibration = cal; tr.output = undefined;
+    const t0 = performance.now();
     const filter = (r: SpriteRef) => {
       if (!data.byId[r.id]?.released) return false;
       if (excluded.has('shiny') && r.shiny) return false;
@@ -109,9 +126,12 @@ export default function BoxScanner() {
         uid, page: t.page, fp: t.fp, alternatives: t.match.alternatives, confidence: t.match.confidence,
         answer: t.match.best ? toAnswer(t.match.best.ref) : null, thumb: t.thumb, cutout: t.cutout,
       })));
+      tr.output = res;
+      tr.timings.scan = performance.now() - t0;
       setWarnings(res.warnings);
       setStage('review');
     } catch (e) {
+      note(tr, `Scan stopped: ${String((e as Error).message || e)}`);
       toast.show(String((e as Error).message || e));
       setStage('calibrate');
     }
@@ -126,7 +146,7 @@ export default function BoxScanner() {
       {stage === 'setup' && <Setup files={files} setFiles={setFiles} search={search} setSearch={setSearch} attrs={attrs} excluded={excluded} onStart={start} ready={!!lib} />}
 
       {stage === 'calibrate' && preview && (
-        <Calibrate page={preview} cal={cal} setCal={setCal} pages={isVideo ? stillTimes.current.length : files.length} onScan={runScan} />
+        <Calibrate page={preview} cal={cal} setCal={setCal} pages={isVideo ? stillTimes.current.length : files.length} onScan={runScan} onTaps={(t) => { trace.current.taps = t; }} />
       )}
 
       {stage === 'scanning' && (
@@ -140,6 +160,10 @@ export default function BoxScanner() {
       )}
 
       {stage === 'review' && <Review data={data} items={items} setItems={setItems} attrs={attrs} warnings={warnings} search={search} />}
+      {/* After a scan, or after one that stopped early (events only holds problems) */}
+      {(stage === 'review' || ((stage === 'setup' || stage === 'calibrate') && trace.current.events.length > 0)) && (
+        <ScanLogCard failed={stage !== 'review'} build={() => buildScanLog(trace.current, stage === 'review' ? items : null, REVIEW_BELOW)} />
+      )}
       {toast.node}
     </div>
   );
@@ -185,7 +209,7 @@ function Setup({ files, setFiles, search, setSearch, attrs, excluded, onStart, r
 }
 
 // ---------------------------------------------------------------- calibration
-function Calibrate({ page, cal, setCal, pages, onScan }: { page: Page; cal: GridCalibration | null; setCal: (c: GridCalibration | null) => void; pages: number; onScan: () => void }) {
+function Calibrate({ page, cal, setCal, pages, onScan, onTaps }: { page: Page; cal: GridCalibration | null; setCal: (c: GridCalibration | null) => void; pages: number; onScan: () => void; onTaps?: (t: NonNullable<ScanTrace['taps']>) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [clicks, setClicks] = useState<{ x: number; y: number }[]>([]);
   const p = page.pixels;
@@ -241,6 +265,7 @@ function Calibrate({ page, cal, setCal, pages, onScan }: { page: Page; cal: Grid
     const fit = autoFitBox(p, base);
     const fitted = fit ? { ...base, ...fit, top: Math.max(0, Math.round((fit.y0 ?? base.y0) - (fit.pitchY ?? base.pitchY) * 0.08)) } : base;
     setCal({ ...fitted, rowTemplate: learnRowTemplate(p, fitted) });
+    onTaps?.({ taps: next, base, fit });
     setClicks([]);
     setRedo(false);
   };
@@ -277,6 +302,44 @@ function Calibrate({ page, cal, setCal, pages, onScan }: { page: Page; cal: Grid
         <div className="scan-preview"><canvas ref={canvasRef} onClick={onClick} style={{ cursor: redo ? 'crosshair' : 'default' }} /></div>
       </Card>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------- troubleshooting log
+function ScanLogCard({ build, failed }: { build: () => Promise<string>; failed: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  const share = useMemo(canShareLog, []);
+  const run = async (how: 'save' | 'share') => {
+    setBusy(true); setDone(null);
+    try {
+      const text = await build();
+      const size = `${(text.length / 1e6).toFixed(1)} MB`;
+      const save = () => { download(logFileName('json'), text, 'application/json'); setDone(`Saved to your downloads (${size})`); };
+      if (how === 'save') save();
+      else {
+        try { await shareLog(text); setDone(`Shared (${size})`); }
+        catch (e) { if ((e as Error).name !== 'AbortError') save(); } // sharing refused: save it instead
+      }
+    } catch (e) {
+      setDone(`Couldn’t make the log: ${String((e as Error).message || e)}`);
+    }
+    setBusy(false);
+  };
+  return (
+    <Card title="Troubleshooting">
+      <div className="col" style={{ gap: 10 }}>
+        <p className="small muted">
+          {failed ? 'The last scan stopped early. ' : ''}A scan log is a file with the details of this scan: your device and browser, the grid, every page and Pokémon the scanner read, and small pictures of the doubtful ones.
+          {failed ? ' ' : ' Fix any wrong answers first and the log records your corrections too. '}It stays on this device unless you send it to someone.
+        </p>
+        <div className="row">
+          <button className="btn" disabled={busy} onClick={() => run('save')}>Save scan log</button>
+          {share && <button className="btn" disabled={busy} onClick={() => run('share')}>Share scan log…</button>}
+          {done && <span className="small muted">{done}</span>}
+        </div>
+      </div>
+    </Card>
   );
 }
 

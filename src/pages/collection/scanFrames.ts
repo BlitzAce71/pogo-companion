@@ -4,7 +4,7 @@ import { rowLuminance, trackSteps, type GridCalibration, type Pixels } from '../
 /** Frames are analysed at this width (phone recordings are scaled down; plenty for 3-column tiles). */
 export const ANALYSIS_WIDTH = 540;
 
-export interface Page { index: number; time: number | null; label: string; pixels: Pixels; canvas?: HTMLCanvasElement }
+export interface Page { index: number; time: number | null; label: string; pixels: Pixels; canvas?: HTMLCanvasElement; /** where the video player says it landed (video only) */ seeked?: number }
 
 /**
  * Where video frames come from. In the app this is the browser's video player (videoSource); tests can
@@ -143,7 +143,7 @@ export function videoSource(video: HTMLVideoElement): FrameSource {
 export async function grabFrame(video: HTMLVideoElement, t: number, index: number): Promise<Page> {
   await seek(video, t);
   const canvas = drawTo(video, video.videoWidth, video.videoHeight, ANALYSIS_WIDTH);
-  return { index, time: t, label: `${t.toFixed(1)}s`, pixels: pixelsOf(canvas), canvas };
+  return { index, time: t, label: `${t.toFixed(1)}s`, pixels: pixelsOf(canvas), canvas, seeked: video.currentTime };
 }
 
 export async function loadImagePage(file: File, index: number): Promise<Page> {
