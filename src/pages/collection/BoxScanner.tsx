@@ -4,7 +4,7 @@ import { Card, Empty, Field, PageHeader, PokeImg, PokemonPicker, Segmented, Sele
 import { displayName, useData } from '../../lib/data';
 import { fmt } from '../../lib/format';
 import {
-  answerKey, attributesFromSearch, autoFitBox, borderColor, excludedFromSearch, findRowPhase, learnRowTemplate, loadLibrary, tileRects, validCalibration,
+  answerKey, attributesFromSearch, autoFitBox, CALIBRATION_VERSION, borderColor, excludedFromSearch, findRowPhase, learnRowTemplate, loadLibrary, tileRects, validCalibration,
   type Candidate, type Fingerprint, type GridCalibration, type ScanAttributes, type SpriteLibrary, type SpriteRef,
 } from '../../lib/scanner';
 import { useCollection, useMyPokemon, useStored, type Collection, type SavedMon } from '../../lib/storage';
@@ -232,7 +232,7 @@ function Calibrate({ page, cal, setCal, pages, onScan }: { page: Page; cal: Grid
     // number, ~0.5 rows tall, ~80% of the column width. Stars/letters poking in at the edges are ignored.
     const base: GridCalibration = {
       // the CP number sits a little right of the tile centre (the small "CP" label is on its left)
-      version: 2, x0: Math.min(a.x, d.x) - pitchX * 0.04, pitchX, pitchY, y0: Math.min(a.y, d.y), boxW: 0.8, boxH: 0.5, offsetY: 0.33, columns: 3, width: p.width,
+      version: CALIBRATION_VERSION, x0: Math.min(a.x, d.x) - pitchX * 0.04, pitchX, pitchY, y0: Math.min(a.y, d.y), boxW: 0.8, boxH: 0.5, offsetY: 0.33, columns: 3, width: p.width,
       // The first clicked CP number is in the first fully visible row, so anything above it is header /
       // search bar. Rows that scroll partly under it are skipped (they reappear on the next page).
       top: Math.max(0, Math.round(Math.min(a.y, d.y) - pitchY * 0.08)), bottom: Math.round(p.height * 0.88),

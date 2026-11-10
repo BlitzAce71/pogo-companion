@@ -95,6 +95,56 @@ const isDmaxPink = (r: number, g: number, b: number) => r >= 150 && b >= 120 && 
  * (pink nearly all in the upper right, where the X sits, reaching the top edge). Normal tiles return null, so yellow or pink
  * Pokémon are never touched.
  */
+/**
+ * Small badges the game draws over a tile, each always at the same spot: a cluster of pale-blue snowflakes
+ * (lower right), a cyan sparkle or a lavender flame (lower left), the favourite star (top right, which
+ * otherwise fuses with a Pokémon that touches it) and the red Mega badge (in the star's place, or under it). Colour alone isn't enough — Glaceon is that cyan, Lugia
+ * that blue — so a badge counts only if its colour fills its own window and stops at the window's edge.
+ * Windows are fractions of the picture box; `min` is the least badge-coloured area (fraction of the box);
+ * `tint` is the wider colour range (the badge's paler edges) cleared around it once found.
+ */
+type Rgb = (R: number, G: number, B: number) => boolean;
+const BADGES: { x0: number; x1: number; y0: number; y1: number; min: number; core: Rgb; tint: Rgb }[] = [
+  { x0: 0.58, x1: 0.86, y0: 0.6, y1: 0.88, min: 0.005, core: (R, G, B) => B >= 215 && R >= 115 && R <= 172 && B - R >= 62 && G - R >= 20 && B - G >= 30, tint: (R, G, B) => B >= 200 && B - R >= 22 && G >= R },
+  { x0: 0.03, x1: 0.31, y0: 0.55, y1: 0.93, min: 0.01, core: (R, G, B) => G >= 200 && B >= 200 && R <= 178 && G - R >= 55 && Math.abs(G - B) <= 30, tint: (R, G, B) => G >= 195 && B >= 195 && G - R >= 18 },
+  { x0: 0.06, x1: 0.29, y0: 0.57, y1: 0.9, min: 0.011, core: (R, G, B) => B >= 205 && R >= 175 && R <= 225 && G >= 120 && G <= 180 && B - G >= 50 && R - G >= 22, tint: (R, G, B) => B >= 200 && B - G >= 18 && R >= G },
+  { x0: 0.69, x1: 0.87, y0: 0, y1: 0.19, min: 0.005, core: (R, G, B) => R >= 220 && G >= 150 && G <= 215 && B <= 80, tint: (R, G, B) => R >= 190 && G >= 110 && G <= R + 5 && R - B >= 60 },
+  ...[[0, 0.19], [0.14, 0.4]].map(([y0, y1]) => ({ x0: 0.68, x1: 0.89, y0, y1, min: 0.003, core: ((R, G, B) => R >= 185 && G >= 70 && G <= 160 && B >= 80 && B <= 170 && R - G >= 55 && R - B >= 40) as Rgb, tint: ((R, G, B) => R >= 180 && R >= G && R - B >= 30) as Rgb })),
+];
+/** Marks the pixels of any badge in `out`; returns whether one was found. */
+function markBadges(p: Pixels, r: Rect, out: Uint8Array): boolean {
+  const { w, h } = r;
+  let found = false;
+  const rgbAt = (x: number, y: number) => { const i = px(p, r.x + x, r.y + y); return [p.data[i], p.data[i + 1], p.data[i + 2]] as const; };
+  for (const badge of BADGES) {
+    const x0 = Math.floor(badge.x0 * w), x1 = Math.ceil(badge.x1 * w) - 1, y0 = Math.floor(badge.y0 * h), y1 = Math.ceil(badge.y1 * h) - 1;
+    const mx = Math.round(w * 0.07), my = Math.round(h * 0.07);
+    let inside = 0, around = 0;
+    const core: number[] = [];
+    for (let y = Math.max(0, y0 - my); y <= Math.min(h - 1, y1 + my); y++) for (let x = Math.max(0, x0 - mx); x <= Math.min(w - 1, x1 + mx); x++) {
+      const [R, G, B] = rgbAt(x, y);
+      if (!badge.core(R, G, B)) continue;
+      if (x >= x0 && x <= x1 && y >= y0 && y <= y1) { inside++; core.push(y * w + x); } else around++;
+    }
+    // enough of the colour inside the window, and it doesn't carry on past it (that would be the Pokémon)
+    if (inside < w * h * badge.min || around > inside * 0.2) continue;
+    found = true;
+    // The badge is drawn over the Pokémon, so nothing of the Pokémon shows there: clear its solid colour
+    // with a 2px rim of whatever is under it, then its paler parts anywhere in (and just beyond) the window.
+    for (const k of core) {
+      const cx = k % w, cy = (k / w) | 0;
+      for (let y = Math.max(0, cy - 2); y <= Math.min(h - 1, cy + 2); y++) for (let x = Math.max(0, cx - 2); x <= Math.min(w - 1, cx + 2); x++) out[y * w + x] = 1;
+    }
+    const ex = Math.round(w * 0.04), ey = Math.round(h * 0.04);
+    for (let y = Math.max(0, y0 - ey); y <= Math.min(h - 1, y1 + ey); y++) for (let x = Math.max(0, x0 - ex); x <= Math.min(w - 1, x1 + ex); x++) {
+      if (out[y * w + x]) continue;
+      const [R, G, B] = rgbAt(x, y);
+      if (badge.tint(R, G, B)) out[y * w + x] = 1;
+    }
+  }
+  return found;
+}
+
 export function backgroundOverlays(p: Pixels, r: Rect, bg: [number, number, number]): Uint8Array | null {
   const { w, h } = r;
   const gold = new Uint8Array(w * h), pink = new Uint8Array(w * h);
@@ -137,9 +187,10 @@ export function backgroundOverlays(p: Pixels, r: Rect, bg: [number, number, numb
   pieces(gold, (_, n, fill, round, onBg) => { if (n >= 8 && fill >= 0.5 && round && onBg >= 0.75) discs++; });
   const lucky = discs >= 2;
   // the X: plenty of pink, nearly all of it in the upper right, reaching the top edge, little in the middle
-  const dmax = pinkTR >= w * h * 0.025 && pinkTR >= pinkAll * 0.9 && pinkTop >= w * h * 0.0025 && pinkMid <= pinkAll * 0.15;
-  if (!lucky && !dmax) return null;
+  const dmax = pinkTR >= w * h * 0.018 && pinkTR >= pinkAll * 0.9 && pinkTop >= w * h * 0.0008 && pinkMid <= pinkAll * 0.15;
   const out = new Uint8Array(w * h);
+  const badges = markBadges(p, r, out);
+  if (!lucky && !dmax && !badges) return null;
   if (lucky) {
     // Remove the sparkles piece by piece: small gold pieces mostly surrounded by background (a disc,
     // or the visible part of one tucked behind the Pokémon) — not a cream belly inside an orange body.
@@ -147,7 +198,7 @@ export function backgroundOverlays(p: Pixels, r: Rect, bg: [number, number, numb
     const warm = new Uint8Array(w * h);
     for (let k = 0; k < w * h; k++) {
       const i = px(p, r.x + (k % w), r.y + ((k / w) | 0)), R = p.data[i], G = p.data[i + 1], B = p.data[i + 2];
-      warm[k] = R >= 200 && G >= 150 && G <= R + 6 && B <= G - 14 && R - B >= 30 ? 1 : 0;
+      warm[k] = R >= 200 && G >= 150 && G >= R - 50 && G <= R + 6 && B <= G - 14 && R - B >= 30 ? 1 : 0; // yellow, not Dragonite's orange
     }
     pieces(warm, (pix, n, _f, _r, onBg) => { if (n <= w * h * 0.15 && onBg >= 0.5) for (const k of pix) out[k] = 1; });
   }
@@ -518,8 +569,9 @@ export function applyNumberOrder(matches: MatchResult[], dexOf: (id: string) => 
 export const answerKey = (r: SpriteRef) => `${r.id}|${r.costume || ''}|${r.shiny ? 1 : 0}`;
 
 // ---------------------------------------------------------------- grid geometry
+export const CALIBRATION_VERSION = 3;
 export interface GridCalibration {
-  /** Calibration format. 2 = anchored on the CP number of each tile. */
+  /** Calibration format. 2 = anchored on the CP number of each tile; 3 = same, saved after the picture-box fit was fixed. */
   version: number;
   /** Anchor (CP number centre) of the first tile (column 0) and horizontal/vertical pitch, in frame pixels at the analysis width */
   x0: number; pitchX: number; pitchY: number;
@@ -541,7 +593,9 @@ export interface GridCalibration {
 /** A calibration is only usable if every measurement is a sensible number (guards against corrupt saved data). */
 export function validCalibration(c: GridCalibration | null | undefined, width?: number): c is GridCalibration {
   if (!c) return false;
-  if (c.version !== 2) return false; // older calibrations used a different anchor — redo the clicks
+  // Older calibrations are redone: v1 used a different anchor, and a v2 one may hold a picture box cut to
+  // half height (dark Pokémon on the calibration frame were mistaken for the name text).
+  if (c.version !== CALIBRATION_VERSION) return false;
   const nums = [c.x0, c.pitchX, c.pitchY, c.boxW, c.boxH, c.offsetY, c.top, c.bottom, c.width, c.columns];
   if (!nums.every((n) => typeof n === 'number' && Number.isFinite(n))) return false;
   if (c.pitchX < 20 || c.pitchY < 20 || c.boxW <= 0 || c.boxH <= 0 || c.bottom <= c.top || c.columns < 1) return false;
@@ -585,16 +639,19 @@ export function autoFitBox(p: Pixels, cal: GridCalibration): Partial<GridCalibra
   if (!band) return null;
   const [a, b] = band;
   // 2. Column clusters of text within that band → tile centres
-  const colCount = new Int32Array(p.width);
-  for (let y = a; y <= b; y++) for (let x = 0; x < p.width; x++) if (isTextPx(p, x, y)) colCount[x]++;
-  const clusters: { x0: number; x1: number; n: number }[] = [];
-  const gap = Math.max(8, cal.pitchX * 0.12);
-  for (let x = 0; x < p.width; x++) {
-    if (!colCount[x]) continue;
-    const last = clusters[clusters.length - 1];
-    if (last && x - last.x1 <= gap) { last.x1 = x; last.n += colCount[x]; } else clusters.push({ x0: x, x1: x, n: colCount[x] });
-  }
-  const labels = clusters.filter((c) => c.n >= 12 && c.x1 - c.x0 >= 8).map((c) => (c.x0 + c.x1) / 2);
+  const labelsIn = (ya: number, yb: number): number[] => {
+    const colCount = new Int32Array(p.width);
+    for (let y = Math.max(0, ya); y <= Math.min(p.height - 1, yb); y++) for (let x = 0; x < p.width; x++) if (isTextPx(p, x, y)) colCount[x]++;
+    const clusters: { x0: number; x1: number; n: number }[] = [];
+    const gap = Math.max(8, cal.pitchX * 0.12);
+    for (let x = 0; x < p.width; x++) {
+      if (!colCount[x]) continue;
+      const last = clusters[clusters.length - 1];
+      if (last && x - last.x1 <= gap) { last.x1 = x; last.n += colCount[x]; } else clusters.push({ x0: x, x1: x, n: colCount[x] });
+    }
+    return clusters.filter((c) => c.n >= 12 && c.x1 - c.x0 >= 8).map((c) => (c.x0 + c.x1) / 2);
+  };
+  const labels = labelsIn(a, b);
   let x0 = cal.x0, pitchX = cal.pitchX;
   if (labels.length >= cal.columns) {
     // pick the run of `columns` labels whose first is closest to the rough x0
@@ -609,18 +666,69 @@ export function autoFitBox(p: Pixels, cal: GridCalibration): Partial<GridCalibra
   let pitchY = cal.pitchY;
   const next = textBandNear(p, Math.round(a + cal.pitchY), cols, 4 * cal.columns, Math.round(cal.pitchY * 0.2));
   if (next && next[0] - a > cal.pitchY * 0.75 && next[0] - a < cal.pitchY * 1.3) pitchY = next[0] - a;
-  // 4. Name band: first ≥4-row text run in the lower part of the tile
-  const textRow = (y: number) => { let n = 0; for (const [xa, xb] of cols) for (let x = Math.max(0, xa); x < Math.min(p.width, xb); x++) if (isTextPx(p, x, y)) n++; return n >= 4 * cal.columns; };
-  let nameTop = -1;
-  for (let y = Math.round(b + pitchY * 0.3); y < a + pitchY * 0.9; y++) if (textRow(y) && textRow(y + 1) && textRow(y + 2) && textRow(y + 3)) { nameTop = y; break; }
+  // 3b. Refit the columns from the CP numbers of every row on the frame. One row alone isn't enough: a CP
+  // number shown in red (a Mega-Evolved Pokémon) isn't text-coloured, so its column goes missing there.
+  {
+    const pts: [number, number][] = [];
+    for (let k = 0; b + k * pitchY < Math.min(p.height, cal.bottom); k++) {
+      for (const lx of labelsIn(Math.round(a + k * pitchY), Math.round(b + k * pitchY))) {
+        const c = Math.round((lx - x0) / pitchX);
+        if (c >= 0 && c < cal.columns && Math.abs(lx - (x0 + c * pitchX)) < pitchX * 0.3) pts.push([c, lx]);
+      }
+    }
+    const fitLine = (q: [number, number][]): [number, number] | null => {
+      const n = q.length; let sc = 0, sx = 0, scc = 0, scx = 0;
+      for (const [c, lx] of q) { sc += c; sx += lx; scc += c * c; scx += c * lx; }
+      const den = n * scc - sc * sc;
+      if (n < cal.columns + 1 || den === 0) return null;
+      const slope = (n * scx - sc * sx) / den;
+      return [(sx - slope * sc) / n, slope];
+    };
+    let line = fitLine(pts);
+    if (line) {
+      // drop stragglers (a half-read label) and fit again
+      const [i0, s0] = line;
+      const kept = pts.filter(([c, lx]) => Math.abs(lx - (i0 + c * s0)) <= Math.max(4, pitchX * 0.03));
+      line = fitLine(kept) ?? line;
+      if (line[1] > cal.pitchX * 0.6 && line[1] < cal.pitchX * 1.5) {
+        [x0, pitchX] = line;
+        for (let c = 0; c < cal.columns; c++) cols[c] = [Math.round(x0 + c * pitchX - pitchX * 0.38), Math.round(x0 + c * pitchX + pitchX * 0.38)];
+      }
+    }
+  }
+  // 4. Name band, measured on every tile of the frame and the median taken. Each tile is read upward from
+  // just above the next row's CP number: the first text met is the name (the HP bar under it is teal, not
+  // text). Reading downward from the picture instead mistakes dark Pokémon (Rayquaza, Hydreigon, Zekrom) for
+  // the name, and one such row used to halve the box for the whole scan.
   const anchor = (a + b) / 2;
   const out: Partial<GridCalibration> = { x0, pitchX, pitchY, y0: anchor };
-  if (nameTop > 0) {
+  const textIn = (c: number, y: number) => { if (y < 0 || y >= p.height) return false; let n = 0; const [xa, xb] = cols[c]; for (let x = Math.max(0, xa); x < Math.min(p.width, xb); x++) if (isTextPx(p, x, y)) n++; return n >= 3; };
+  const maxName = pitchY * 0.15, tops: number[] = [];
+  for (let k = 0; anchor + (k + 0.9) * pitchY < Math.min(p.height, cal.bottom); k++) {
+    const rowY = anchor + k * pitchY;
+    for (let c = 0; c < cal.columns; c++) {
+      let y = Math.round(rowY + pitchY * 0.88);
+      const stop = rowY + pitchY * 0.45;
+      while (y > stop && !(textIn(c, y) && textIn(c, y - 1) && textIn(c, y - 2))) y--;
+      if (y <= stop) continue;
+      const nameBottom = y;
+      while (nameBottom - y < maxName && (textIn(c, y - 1) || textIn(c, y - 2))) y--;
+      if (nameBottom - y >= maxName) continue; // a dark Pokémon touches the name — can't tell where it starts
+      tops.push((y - rowY) / pitchY);
+    }
+  }
+  if (tops.length >= 3) {
+    tops.sort((x, y) => x - y);
+    const nameTop = anchor + tops[tops.length >> 1] * pitchY;
     const top = b + Math.max(2, pitchY * 0.015), bottom = nameTop - Math.max(2, pitchY * 0.015);
-    if (bottom - top >= pitchY * 0.25) { out.offsetY = ((top + bottom) / 2 - anchor) / pitchY; out.boxH = (bottom - top) / pitchY; }
+    const boxH = (bottom - top) / pitchY;
+    // The game's tile layout is fixed, so a box far from the usual ~0.52 rows means a misread: keep the defaults
+    if (boxH >= BOX_H_MIN && boxH <= BOX_H_MAX) { out.offsetY = ((top + bottom) / 2 - anchor) / pitchY; out.boxH = boxH; }
   }
   return out;
 }
+/** Plausible picture-box heights, in rows. The real value is ~0.52; a dark Pokémon misread as the name gives ~0.27. */
+const BOX_H_MIN = 0.42, BOX_H_MAX = 0.62;
 
 /** Foreground "mass" per y inside the sprite columns, for finding where rows sit after scrolling. */
 function rowProfile(p: Pixels, cal: GridCalibration, bg: [number, number, number]): Float32Array {
