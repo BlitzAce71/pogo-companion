@@ -999,6 +999,95 @@ export function trackSteps(profiles: Float32Array[], cal: GridCalibration): numb
   return steps;
 }
 
+// ---------------------------------------------------------------- page placement by picture content
+/** Vertical strips the picture is cut into for bandProfile. */
+export const BANDS = 16;
+/**
+ * Brightness of every pixel row in each of BANDS vertical strips (the left 80% of the width, clear of
+ * the scroll handle), as rows × BANDS values. rowLuminance gives one number per row, and so looks the
+ * same every grid row; strips tell the rows apart, because each row holds different Pokémon.
+ */
+export function bandProfile(p: Pixels): Float32Array {
+  const out = new Float32Array(p.height * BANDS);
+  const xa = Math.round(p.width * 0.03), bw = (p.width * 0.78) / BANDS;
+  for (let y = 0; y < p.height; y++) {
+    for (let b = 0; b < BANDS; b++) {
+      const x1 = Math.round(xa + (b + 1) * bw);
+      let s = 0, n = 0;
+      for (let x = Math.round(xa + b * bw); x < x1; x += 2) { const i = px(p, x, y); s += p.data[i] * 3 + p.data[i + 1] * 6 + p.data[i + 2]; n++; }
+      out[y * BANDS + b] = s / (n * 10);
+    }
+  }
+  return out;
+}
+
+/**
+ * How different two band profiles are (0–255) when content at y in b was at y + shift in a, over the
+ * rows from y0 to y1 that both have. Null if they share fewer than minRows rows.
+ */
+export function bandError(a: Float32Array, b: Float32Array, y0: number, y1: number, shift: number, minRows = 1): number | null {
+  const ya = Math.max(y0, y0 - shift), yb = Math.min(y1, y1 - shift);
+  if (yb - ya < minRows) return null;
+  let e = 0, n = 0;
+  for (let y = ya; y < yb; y += 2) {
+    const ib = y * BANDS, ia = (y + shift) * BANDS;
+    for (let k = 0; k < BANDS; k++) e += Math.abs(b[ib + k] - a[ia + k]);
+    n += BANDS;
+  }
+  return e / n;
+}
+
+/** Brightness (0–255) of every pixel of a page, for clearDiff. */
+export function lumaMap(p: Pixels): Uint8Array {
+  const out = new Uint8Array(p.width * p.height);
+  for (let i = 0, j = 0; j < out.length; i += 4, j++) out[j] = (p.data[i] * 3 + p.data[i + 1] * 6 + p.data[i + 2]) / 10;
+  return out;
+}
+
+/**
+ * Share (0–1) of pixels that clearly differ between two pages when content at y in b was at y + shift
+ * in a, over the rows from y0 to y1 that both have (left 80% of the width). Rows of the same species
+ * look alike on average, but their printed CP differs — which this picks up and an average does not.
+ * A pixel only counts if it also differs from its counterpart's neighbours above and below: two pages
+ * rarely line up to the exact pixel, which smears every edge a little.
+ */
+export function clearDiff(a: Uint8Array, b: Uint8Array, width: number, y0: number, y1: number, shift: number, minRows = 1): number | null {
+  const ya = Math.max(y0, y0 - shift) + 1, yb = Math.min(y1, y1 - shift) - 1;
+  if (yb - ya < minRows) return null;
+  const xa = Math.round(width * 0.03), xb = Math.round(width * 0.81);
+  let n = 0, bad = 0;
+  for (let y = ya; y < yb; y += 2) {
+    const rb = y * width, ra = (y + shift) * width;
+    for (let x = xa; x < xb; x += 2) {
+      const v = b[rb + x];
+      n++;
+      if (Math.abs(v - a[ra + x]) > 40 && Math.abs(v - a[ra + x - width]) > 40 && Math.abs(v - a[ra + x + width]) > 40) bad++;
+    }
+  }
+  return bad / n;
+}
+
+/**
+ * The likeliest distances the list scrolled between two pages, from the picture itself: every shift
+ * that leaves at least minRows rows in common is tried, and the best `count` are returned (best
+ * first, each at least `apart` pixels from the others; positive = content moved up). Band profiles
+ * only narrow it down — rows of one species score alike — so the caller settles it with clearDiff.
+ */
+export function contentShifts(a: Float32Array, b: Float32Array, top: number, bottom: number, minRows: number, apart: number, count: number): { shift: number; error: number }[] {
+  const reach = Math.floor(bottom - top - minRows);
+  if (reach < 0) return [];
+  const errs = new Float32Array(reach * 2 + 1);
+  for (let s = -reach; s <= reach; s++) errs[s + reach] = bandError(a, b, top, bottom, s, minRows) ?? Infinity;
+  const out: { shift: number; error: number }[] = [];
+  while (out.length < count) {
+    let best = -1;
+    for (let i = 0; i < errs.length; i++) if (Number.isFinite(errs[i]) && (best < 0 || errs[i] < errs[best]) && out.every((o) => Math.abs(o.shift - (i - reach)) >= apart)) best = i;
+    if (best < 0) break;
+    out.push({ shift: best - reach, error: errs[best] });
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- search-string attributes
 export interface ScanAttributes { lucky?: boolean; shadow?: boolean; purified?: boolean; shiny?: boolean; dynamax?: boolean; gigantamax?: boolean; costume?: boolean; female?: boolean; male?: boolean; stars?: 0 | 1 | 2 | 3 | 4; favorite?: boolean; legendary?: boolean; /** 0/0/0 IVs (searched as 0attack&0defense&0hp) */ nundo?: boolean }
 

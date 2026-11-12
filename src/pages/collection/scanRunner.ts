@@ -1,7 +1,7 @@
 // Drives a full scan: turns a recording (or screenshots) into identified tiles. Kept free of React so
 // it can be run and tested on its own.
 import {
-  applyNumberOrder, borderColor, cutoutPreview, eraseScrollHandle, findRowPhase, fingerprintRegion, isFadedTile, matchFingerprint, pageOverlap, profileShift, rowLuminance, tileRects, tileSignature,
+  applyNumberOrder, bandError, bandProfile, borderColor, clearDiff, contentShifts, cutoutPreview, eraseScrollHandle, findRowPhase, fingerprintRegion, isFadedTile, lumaMap, matchFingerprint, pageOverlap, profileShift, rowLuminance, tileRects, tileSignature,
   type Fingerprint, type GridCalibration, type MatchOptions, type MatchResult, type Rect, type SpriteLibrary, type TileSignature,
 } from '../../lib/scanner';
 import { followScroll, loadImagePage, measureScroll, thumbnail, type FrameSource, type Page, type StillRun } from './scanFrames';
@@ -19,16 +19,25 @@ export interface PageLog {
   slots: number; empty: number; repeated: number; faded: number; added: number;
   /** tiles read again here because the scroll handle covered them the first time */ reread: number;
   /** how far this frame was from the frame it was placed by, and whether that had to be followed frame by frame */ moved: number; followed: boolean;
+  /** what settled its place: the picture compared with the last page read, the scroll tracker alone, or in-between frames fetched to connect two pages that share no rows */ placedBy?: 'first' | 'picture' | 'tracker' | 'bridge';
+  /** pixels the picture moved this page from where the scroll tracker had put it */ fixed?: number;
+  /** share of pixels (0–1) that clearly differ from the last page read at the best shift the picture offers, and at the next best */ diff?: number; rival?: number;
   /** rows that went by unread before this page */ gapRows: number;
   /** the scroll handle was on screen and erased */ handle: boolean;
   /** time to fetch the frame, and to read it */ grabMs: number; readMs: number;
 }
 /** One followed scroll between two pauses. */
 export interface ScrollLog { /** why this stretch was followed: between two pauses, or because a frame wasn't where a pause said it would be */ why: 'scroll' | 'page' | 'pause end'; from: number; to: number; total: number; frames: number; /** biggest move between two frames */ fastest: number; /** times of in-between frames that were read */ reads: number[]; /** scroll so far at each frame */ cum: number[] }
-export interface ScanTrail { pages: PageLog[]; scrolls: ScrollLog[] }
+export interface ScanTrail { pages: PageLog[]; scrolls: ScrollLog[]; /** frames left out: another screen was up (`header` is how far the strip above the list was from the first page's), or the list couldn't be matched to the last page read */ skipped: { label: string; time: number; header: number; why: 'not the list' | 'no match' }[] }
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 /** Two frames are the same view, a little shifted, when their row profiles match this well (0–255 scale). Still frames score under 1.2; frames a row apart score over 5. */
 const HOP_OK = 2;
+/** Two pages show the same rows at some shift when under this share of their pixels clearly differ there. Right shifts score under 0.9%; a row off scores at least 1.9%, even in a run of one species (the printed CP differs). */
+const DIFF_OK = 0.012;
+/** ...and that shift only counts as the picture's answer if every other candidate is at least this much worse. */
+const DIFF_GAP = 0.01;
+/** The strip above the list (tabs, search bar) matches the first page's this well while the storage list is on screen (it scores under 1; another screen scores over 60). */
+const HEADER_OK = 8;
 
 export interface ScanOptions {
   lib: SpriteLibrary;
@@ -73,7 +82,7 @@ function makeProcessor(o: ScanOptions, out: ScanOutput, gaps: string[], noOverla
   const overlaps = (a: Rect, b: Rect | null) => !!b && a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
   return {
     get prev() { return prev; },
-    process(page: Page, pos: number | null, grabMs = 0, placed: { moved: number; followed: boolean } = { moved: 0, followed: false }) {
+    process(page: Page, pos: number | null, grabMs = 0, placed: { moved: number; followed: boolean; placedBy?: PageLog['placedBy']; fixed?: number; diff?: number; rival?: number } = { moved: 0, followed: false }) {
       const t0 = now();
       const p = page.pixels;
       const handle = eraseScrollHandle(p);
@@ -124,7 +133,7 @@ function makeProcessor(o: ScanOptions, out: ScanOutput, gaps: string[], noOverla
       prev = { rowYs, sigs, pos };
       out.log.pages.push({
         label: page.label, time: page.time, seeked: page.seeked, pos, width: p.width, height: p.height, phase, rows: rowYs,
-        slots: rects.length, empty: fps.filter((f) => !f).length, repeated: Math.min(skip, rects.length), faded, added, reread, moved: placed.moved, followed: placed.followed, gapRows, handle: !!handle,
+        slots: rects.length, empty: fps.filter((f) => !f).length, repeated: Math.min(skip, rects.length), faded, added, reread, moved: placed.moved, followed: placed.followed, placedBy: placed.placedBy, fixed: placed.fixed, diff: placed.diff, rival: placed.rival, gapRows, handle: !!handle,
         grabMs: Math.round(grabMs), readMs: Math.round(now() - t0),
       });
       out.pagesRead++;
@@ -147,7 +156,7 @@ function finish(out: ScanOutput, o: ScanOptions) {
  */
 export async function scanVideo(video: FrameSource, pauses: StillRun[], o: ScanOptions): Promise<ScanOutput> {
   const { cal } = o;
-  const out: ScanOutput = { tiles: [], warnings: [], pagesRead: 0, faded: 0, log: { pages: [], scrolls: [] } };
+  const out: ScanOutput = { tiles: [], warnings: [], pagesRead: 0, faded: 0, log: { pages: [], scrolls: [], skipped: [] } };
   const gaps: string[] = [], noOverlap: string[] = [];
   const proc = makeProcessor(o, out, gaps, noOverlap);
   // The start and end of the recording count as pauses, so continuous scrolling still gets covered
@@ -172,6 +181,76 @@ export async function scanVideo(video: FrameSource, pauses: StillRun[], o: ScanO
     out.log.scrolls.push({ why, from: Math.min(t, from.t), to: Math.max(t, from.t), total: track.total, frames: track.frames.length, fastest: track.frames.reduce((m, f) => Math.max(m, f.step), 0), reads: [], cum: track.frames.map((f) => Math.round(f.cum)) });
     return { moved: back ? -track.total : track.total, followed: true };
   };
+  // The tracker follows the list by its row pattern, which looks the same every row — so a flick that
+  // jumps more than a row between two frames can be mistaken for a smaller move, and so can any move
+  // through a run of one species. The picture settles it: each page is compared with the last page
+  // read to see which rows they share.
+  interface Seen { t: number; bands: Float32Array; luma: Uint8Array; pos: number }
+  interface Via extends Seen { page: Page }
+  /** A possible shift between two pages and the share of pixels that clearly differ there. */
+  interface Fit { shift: number; diff: number }
+  let seen: Seen | null = null; // the last list page read
+  let header: Float32Array | null = null; // the first page's bands (for the strip above the list)
+  let lost = false; // the list went off screen, so the tracker's position can't be relied on
+  let width = 0;
+  const minRows = Math.round(cal.pitchY * 0.75), apart = Math.round(cal.pitchY * 0.25), row = Math.round(cal.pitchY);
+  const headBottom = Math.round(cal.top - cal.pitchY * 0.15), headTop = Math.min(Math.round(headBottom * 0.2), headBottom - 1);
+  /** Score the likeliest shifts between two pages (plus any given), best first, one per neighbourhood. */
+  const fits = (a: Seen, bands: Float32Array, luma: Uint8Array, extra: number[]): Fit[] => {
+    const out: Fit[] = [];
+    for (const s of [...extra, ...contentShifts(a.bands, bands, top, bottom, minRows, apart, 5).map((c) => c.shift)]) {
+      // settle the exact shift by the band profile (clearDiff is deliberately blind to a pixel either way), then score it
+      let at = NaN, err = Infinity;
+      const errAt = (k: number) => bandError(a.bands, bands, top, bottom, k, minRows) ?? Infinity;
+      for (let k = s - 6; k <= s + 6; k++) { const e = errAt(k); if (e < err) { err = e; at = k; } }
+      if (!Number.isFinite(err)) continue;
+      const l = errAt(at - 1), r = errAt(at + 1), curve = l - 2 * err + r;
+      const frac = Number.isFinite(curve) && curve > 1e-6 ? Math.max(-0.5, Math.min(0.5, (l - r) / (2 * curve))) : 0;
+      let diff = Infinity;
+      for (let k = at - 1; k <= at + 1; k++) diff = Math.min(diff, clearDiff(a.luma, luma, width, top, bottom, k, minRows) ?? Infinity);
+      if (!Number.isFinite(diff)) continue;
+      const best: Fit = { shift: at + frac, diff };
+      const shift = best.shift, near = out.findIndex((f) => Math.abs(f.shift - shift) < apart);
+      if (near < 0) out.push(best); else if (best.diff < out[near].diff) out[near] = best;
+    }
+    return out.sort((x, y) => x.diff - y.diff);
+  };
+  /** The one shift the picture supports, if there is exactly one. */
+  const only = (f: Fit[]): Fit | null => (f.length && f[0].diff < DIFF_OK && (f.length < 2 || f[1].diff >= f[0].diff + DIFF_GAP) ? f[0] : null);
+  /** Where a page is in the list: the tracker's answer checked against the picture. Null if neither can be trusted. */
+  const locate = (bands: Float32Array, luma: Uint8Array, tracked: number): { pos: number; by: 'picture' | 'tracker'; diff?: number; rival?: number } | null => {
+    const last = seen!;
+    const d = Math.round(tracked - last.pos);
+    // candidates: what the tracker says, the same a row or two either way (the mistakes it makes), and the band profile's best
+    const f = fits(last, bands, luma, lost ? [] : [d, d - row, d + row, d - 2 * row, d + 2 * row]);
+    const info = { diff: f[0]?.diff, rival: f[1]?.diff };
+    const best = only(f);
+    if (best) return { pos: last.pos + best.shift, by: 'picture', ...info };
+    if (lost) return null;
+    // The pages share no rows where the tracker puts this one, so there is nothing to check it against —
+    // or more than one shift fits the picture and the tracker's is among them.
+    const shares = clearDiff(last.luma, luma, width, top, bottom, d, minRows + 8) !== null;
+    const mine = f.find((x) => Math.abs(x.shift - d) < apart);
+    if (!shares || (mine && mine.diff < DIFF_OK)) return { pos: tracked, by: 'tracker', ...info };
+    return null;
+  };
+  /** Connect two pages that share no rows through frames between them. Fills `via` in time order. */
+  const bridge = async (a: Seen, t1: number, bands: Float32Array, luma: Uint8Array, depth: number, via: Via[]): Promise<number | null> => {
+    if (depth > 4 || via.length >= 12 || Math.abs(t1 - a.t) < 0.06) return null;
+    if (o.signal?.aborted) throw new Error('Cancelled');
+    const t = (a.t + t1) / 2;
+    const page = await video.page(t, out.pagesRead);
+    page.label = label(t);
+    const mid: Via = { t, bands: bandProfile(page.pixels), luma: lumaMap(page.pixels), pos: 0, page };
+    const s1 = only(fits(a, mid.bands, mid.luma, []));
+    const midPos = s1 ? a.pos + s1.shift : await bridge(a, t, mid.bands, mid.luma, depth + 1, via);
+    if (midPos === null) return null;
+    mid.pos = midPos;
+    via.push(mid);
+    const s2 = only(fits(mid, bands, luma, []));
+    return s2 ? midPos + s2.shift : bridge(mid, t1, bands, luma, depth + 1, via);
+  };
+  const round4 = (x: number | undefined) => (x === undefined ? undefined : Math.round(x * 10000) / 10000);
   /** Read the frame at t, placing it by a known frame (the first page is the origin). */
   const read = async (t: number, ref: Known | null): Promise<Known> => {
     if (o.signal?.aborted) throw new Error('Cancelled');
@@ -182,9 +261,42 @@ export async function scanVideo(video: FrameSource, pauses: StillRun[], o: ScanO
     const grabMs = now() - t0;
     const prof = rowLuminance(page.pixels);
     const placed = ref ? await moved(ref, t, prof, 'page') : { moved: 0, followed: false };
-    const pos = (ref?.pos ?? 0) + placed.moved;
-    proc.process(page, pos, grabMs, placed);
-    return { t, prof, pos };
+    const tracked = (ref?.pos ?? 0) + placed.moved;
+    const bands = bandProfile(page.pixels), luma = lumaMap(page.pixels);
+    if (!seen) { // the first page: the origin, and what the storage list's header looks like
+      header = bands;
+      width = page.pixels.width;
+      proc.process(page, tracked, grabMs, { ...placed, placedBy: 'first' });
+      seen = { t, bands, luma, pos: tracked };
+      return { t, prof, pos: tracked };
+    }
+    let where: { pos: number; by: 'picture' | 'tracker' | 'bridge'; diff?: number; rival?: number } | null = locate(bands, luma, tracked);
+    if (!where) {
+      // Neither the tracker nor the picture places this frame. If the list is on screen, look for frames
+      // in between that connect it to the last page; failing that, leave the frame out — it's a
+      // Pokémon's page, the select mode, or the list with something over it.
+      const head = bandError(header!, bands, headTop, headBottom, 0) ?? 0;
+      const via: Via[] = [];
+      const pos = head > HEADER_OK ? null : await bridge(seen, t, bands, luma, 0, via);
+      if (pos === null) {
+        out.log.skipped.push({ label: page.label, time: t, header: Math.round(head * 10) / 10, why: head > HEADER_OK ? 'not the list' : 'no match' });
+        lost = lost || head > HEADER_OK;
+        return { t, prof, pos: lost ? seen.pos : tracked };
+      }
+      // read the in-between frames that are needed so no rows go by unread
+      const spacing = Math.max(1, (proc.prev?.rowYs.length ?? 2) - 1) * cal.pitchY;
+      via.forEach((m, k) => {
+        const from = seen!.pos, after = k + 1 < via.length ? via[k + 1].pos : pos;
+        if (after - from <= spacing + cal.pitchY * 0.25 || m.pos <= from + cal.pitchY * 0.5) return;
+        proc.process(m.page, m.pos, 0, { moved: m.pos - from, followed: true, placedBy: 'bridge' });
+        seen = m;
+      });
+      where = { pos, by: 'bridge' };
+    }
+    lost = false;
+    proc.process(page, where.pos, grabMs, { ...placed, placedBy: where.by, fixed: Math.round((where.pos - tracked) * 10) / 10, diff: round4(where.diff), rival: round4(where.rival) });
+    seen = { t, bands, luma, pos: where.pos };
+    return { t, prof, pos: where.pos };
   };
 
   let cur = await read(runs[0].time, null);
@@ -214,13 +326,15 @@ export async function scanVideo(video: FrameSource, pauses: StillRun[], o: ScanO
     cur = await read(runs[i].time, { t: runs[i].start, prof: track.profiles[track.profiles.length - 1], pos: endPos });
   }
   finish(out, o);
+  const sk = out.log.skipped;
+  if (sk.length) out.warnings.push(`Left out ${sk.length} moment${sk.length > 1 ? 's' : ''} where the storage list wasn’t plainly on screen (${sk.slice(0, 6).map((s) => s.label).join(', ')}${sk.length > 6 ? '…' : ''}) — a Pokémon’s page or the select mode was open, or something covered the list.`);
   if (gaps.length) out.warnings.push(`Rows went by too fast to read near ${gaps.slice(0, 8).join(', ')}${gaps.length > 8 ? '…' : ''}. Those Pokémon are missing from this scan — scroll a little slower there.`);
   return out;
 }
 
 /** Scan screenshots (in order). Repeated rows are recognised by comparing tiles, since there's no motion to follow. */
 export async function scanImages(files: File[], o: ScanOptions): Promise<ScanOutput> {
-  const out: ScanOutput = { tiles: [], warnings: [], pagesRead: 0, faded: 0, log: { pages: [], scrolls: [] } };
+  const out: ScanOutput = { tiles: [], warnings: [], pagesRead: 0, faded: 0, log: { pages: [], scrolls: [], skipped: [] } };
   const gaps: string[] = [], noOverlap: string[] = [];
   const proc = makeProcessor(o, out, gaps, noOverlap);
   for (let i = 0; i < files.length; i++) {

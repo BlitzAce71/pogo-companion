@@ -102,7 +102,7 @@ export async function buildScanLog(trace: ScanTrace, items: LogItem[] | null, fl
   }
   const nav = navigator as Navigator & { deviceMemory?: number };
   return format({
-    kind: 'pogo-companion box scan log', logVersion: 2, saved: new Date().toISOString(), started: trace.started,
+    kind: 'pogo-companion box scan log', logVersion: 3, saved: new Date().toISOString(), started: trace.started,
     app: {
       build: typeof __BUILD__ !== 'undefined' ? __BUILD__ : null, calibrationVersion: CALIBRATION_VERSION, page: location.origin + location.pathname,
       installed: typeof matchMedia === 'function' && matchMedia('(display-mode: standalone)').matches,
@@ -116,6 +116,9 @@ export async function buildScanLog(trace: ScanTrace, items: LogItem[] | null, fl
       pauses: trace.pauses?.length, corrected, removed, reviewed: !!items, picturesKept: pictures,
       // pages that weren't where a pause said they'd be (the list was followed frame by frame instead), and tiles read again clear of the scroll handle
       pagesFollowed: out.log.pages.filter((p) => p.followed).length, reread,
+      // pages the picture check moved by more than a quarter row from where the scroll tracker put them, pages it could not check, and moments left out because the list was not on screen
+      pagesMoved: out.log.pages.filter((p) => Math.abs(p.fixed ?? 0) > (trace.calibration?.pitchY ?? 200) / 4).length,
+      pagesUnchecked: out.log.pages.filter((p) => p.placedBy === 'tracker').length, skipped: out.log.skipped.length,
     } : { scanFinished: false },
     search: trace.search,
     source: trace.source,
@@ -130,6 +133,7 @@ export async function buildScanLog(trace: ScanTrace, items: LogItem[] | null, fl
     stillDiffs: trace.stillDiffs,
     pages: out?.log.pages,
     scrolls: out?.log.scrolls,
+    skipped: out?.log.skipped,
     tiles,
     firstPage: trace.firstPage,
   });
