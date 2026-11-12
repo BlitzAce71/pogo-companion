@@ -7,9 +7,10 @@ import {
   answerKey, attributesFromSearch, autoFitBox, CALIBRATION_VERSION, borderColor, excludedFromSearch, findRowPhase, learnRowTemplate, loadLibrary, tileRects, validCalibration,
   type Candidate, type Fingerprint, type GridCalibration, type ScanAttributes, type SpriteLibrary, type SpriteRef,
 } from '../../lib/scanner';
-import { useCollection, useMyPokemon, useStored, type Collection, type SavedMon } from '../../lib/storage';
+import { useCollection, useMyPokemon, useStored, type SavedMon } from '../../lib/storage';
 import type { GameData } from '../../lib/types';
 import { findStillTimes, loadImagePage, loadVideo, videoSource, type FrameSource, type Page, type StillRun } from './scanFrames';
+import { dexFileName, dexFileText, dexNaming, mergeDex, scanDexMarks } from './dexFile';
 import { download } from './monStats';
 import { buildScanLog, canShareLog, logFileName, newTrace, note, shareLog, type ScanTrace } from './scanLog';
 import { scanImages, scanVideo } from './scanRunner';
@@ -472,31 +473,20 @@ function ImportCard({ data, items, attrs, search }: { data: GameData; items: Sca
   const answered = items.filter((i) => i.answer);
   const unsure = items.filter((i) => !i.edited && i.confidence < REVIEW_BELOW).length;
 
+  // What this scan says about the dex (the same marks whether imported here or saved as a file)
+  const scanMarks = () => scanDexMarks(answered.map((i) => i.answer!), attrs);
+  const saveDexFile = () => {
+    const marks = scanMarks();
+    download(dexFileName('scan'), dexFileText(marks, 'scan', dexNaming(data), search ? `Box Scanner, search: ${search}` : 'Box Scanner'), 'application/json');
+    toast.show(`Saved ${fmt(Object.keys(marks).length)} Pokémon as a dex file`);
+  };
+
   const run = () => {
     let dexMarks = 0, added = 0, merged = 0;
     if (toDex) {
-      const next: Collection = { ...collection };
-      const mark = (key: string, flags: string[]) => {
-        const e = { ...(next[key] || {}) } as Record<string, 1>;
-        for (const f of ['caught', ...flags]) if (!e[f]) { e[f] = 1; dexMarks++; }
-        next[key] = e;
-      };
-      for (const i of answered) {
-        const a = i.answer!;
-        const flags: string[] = [];
-        if (a.shiny) flags.push('shiny');
-        if (attrs.lucky) flags.push('lucky');
-        if (attrs.shadow) flags.push('shadow');
-        if (attrs.purified) flags.push('purified');
-        if (attrs.dynamax) flags.push('dynamax');
-        if (attrs.gigantamax) flags.push('gigantamax');
-        if (attrs.stars === 4) flags.push(a.shiny ? 'shundo' : 'hundo');
-        if (attrs.stars === 3) flags.push('threestar');
-        if (attrs.nundo) flags.push('nundo');
-        mark(a.costume || a.id, flags.filter((f) => !a.costume || ['shiny', 'lucky', 'hundo', 'threestar', 'nundo'].includes(f)));
-        if (a.costume) mark(a.id, []); // a costume also registers the species
-      }
-      setAll(next);
+      const m = mergeDex(collection, scanMarks());
+      dexMarks = m.newMarks;
+      setAll(m.next);
     }
     if (toMons !== 'none') {
       const tags = [tag.trim(), ...(attrs.female ? ['female'] : []), ...(attrs.male ? ['male'] : []), ...(attrs.dynamax ? ['dynamax'] : []), ...(attrs.gigantamax ? ['gigantamax'] : []), ...(attrs.stars !== undefined ? [`${attrs.stars}*`] : [])].filter(Boolean);
@@ -543,7 +533,12 @@ function ImportCard({ data, items, attrs, search }: { data: GameData; items: Sca
         </Field>
         {toMons === 'merge' && <p className="small muted">For attribute scans (e.g. a <code>lucky</code> or <code>4*</code> search): each scanned Pokémon updates one saved Pokémon of the same species that doesn’t have the attribute yet; extras are added as new. Which individual gets it can’t be known without CP, so this is right by count.</p>}
         {toMons !== 'none' && <Field label="Tag" hint="Added to every imported Pokémon so you can filter or undo this scan later."><input className="input" value={tag} onChange={(e) => setTag(e.target.value)} style={{ maxWidth: 260 }} /></Field>}
-        <div className="row"><button className="btn primary" disabled={!answered.length} onClick={run}>Import {fmt(answered.length)} Pokémon</button>{done && <span className="small good">✓ {done}</span>}</div>
+        <div className="row">
+          <button className="btn primary" disabled={!answered.length} onClick={run}>Import {fmt(answered.length)} Pokémon</button>
+          <button className="btn" disabled={!answered.length} onClick={saveDexFile}>⬇ Save as dex file</button>
+          {done && <span className="small good">✓ {done}</span>}
+        </div>
+        <p className="small muted">A dex file holds this scan’s My Dex marks without importing them here. Open it with Import on the <Link to="/collection">My Dex</Link> page, on this device or another, to add them.</p>
       </div>
       {toast.node}
     </Card>

@@ -7,6 +7,8 @@ import { spriteUrls } from '../../lib/images';
 import { TYPES } from '../../lib/pogo';
 import { DEX_FLAGS, useCollection, usePrefs, useStored, type Collection, type DexEntry, type DexFlag } from '../../lib/storage';
 import type { Pokemon } from '../../lib/types';
+import { dexFileName, dexFileText, dexNaming, mergeDex, parseDexFile } from './dexFile';
+import { download } from './monStats';
 import './collection.css';
 
 // ---------------------------------------------------------------- constants & helpers
@@ -309,12 +311,40 @@ export default function MyDex() {
   const filtered = !!(q || view.gen || view.type || view.show !== 'all');
   const closeDetail = useCallback(() => setDetail(null), []);
 
+  // ----- export / import (dex files)
+  const fileRef = useRef<HTMLInputElement>(null);
+  const exportDex = () => {
+    download(dexFileName('my-dex'), dexFileText(collection, 'my-dex', dexNaming(data)), 'application/json');
+    toast.show(`Exported ${fmt(Object.keys(collection).length)} Pokémon`);
+  };
+  const importDex = async (file: File) => {
+    try {
+      const { marks, skipped } = parseDexFile(await file.text(), (id) => !!data.byId[id] || !!data.costumeById[id]);
+      const m = mergeDex(collection, marks);
+      const ignored = skipped ? ` ${fmt(skipped)} unrecognised ${skipped === 1 ? 'entry was' : 'entries were'} ignored.` : '';
+      if (!m.newMarks) { toast.show(`Nothing new: everything in that file is already in your dex.${ignored}`); return; }
+      const fresh = m.newPokemon ? ` (${fmt(m.newPokemon)} not in your dex yet)` : '';
+      if (!window.confirm(`Add ${fmt(m.newMarks)} new ${m.newMarks === 1 ? 'mark' : 'marks'} to ${fmt(m.changed)} Pokémon${fresh}? Marks you already have are kept; nothing is removed.${ignored}`)) return;
+      setAll(m.next);
+      toast.show(`Imported ${fmt(m.newMarks)} ${m.newMarks === 1 ? 'mark' : 'marks'}`);
+    } catch (e) {
+      toast.show(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
   return (
     <div className="stack">
       <PageHeader
         title="My Dex"
-        subtitle={<>Your personal Pokédex checklist. Pick a marking mode, then tap tiles to mark them. Right-click or long-press a tile to set several flags at once. Saved on this device. Back it up from <Link to="/settings">Settings</Link>.</>}
-        actions={<Link className="btn" to="/collection/mons">🎒 My Pokémon</Link>}
+        subtitle={<>Your personal Pokédex checklist. Pick a marking mode, then tap tiles to mark them. Right-click or long-press a tile to set several flags at once. Saved on this device. Export saves it as a dex file; Import adds the marks from a dex file (from here or from a Box Scanner run) without removing any.</>}
+        actions={
+          <>
+            <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) importDex(f); e.target.value = ''; }} />
+            <button className="btn" onClick={() => fileRef.current?.click()}>⬆ Import</button>
+            <button className="btn" onClick={exportDex} disabled={!Object.keys(collection).length}>⬇ Export</button>
+            <Link className="btn" to="/collection/mons">🎒 My Pokémon</Link>
+          </>
+        }
       />
 
       {/* Summary */}
